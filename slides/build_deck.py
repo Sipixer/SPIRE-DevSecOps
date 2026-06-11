@@ -63,6 +63,8 @@ def box(s, x, y, w, h, label, sub=None, fill=SOFT, border=LINE, ink=INK, accent=
         bar.line.fill.background(); bar.shadow.inherit = False
     tf = sh.text_frame; tf.word_wrap = True
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    if accent:
+        tf.margin_left = Inches(0.25)
     p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
     r = p.add_run(); r.text = label
     r.font.size = Pt(15); r.font.bold = True; r.font.color.rgb = ink; r.font.name = "Calibri"

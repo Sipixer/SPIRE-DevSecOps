@@ -57,7 +57,7 @@ data:
                   require_client_certificate: true
                   common_tls_context:
                     tls_certificate_sds_secret_configs:
-                      - name: "spiffe://example.org/ns/shop/sa/analytics"
+                      - name: "default"
                         sds_config:
                           resource_api_version: V3
                           api_config_source:
@@ -72,7 +72,7 @@ data:
                             matcher:
                               prefix: "spiffe://example.org/"
                       validation_context_sds_secret_config:
-                        name: "spiffe://example.org"
+                        name: "ROOTCA"
                         sds_config:
                           resource_api_version: V3
                           api_config_source:

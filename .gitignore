@@ -20,3 +20,4 @@ services/gateway/gateway
 # Node
 node_modules/
 services/analytics/analytics
+.claude/

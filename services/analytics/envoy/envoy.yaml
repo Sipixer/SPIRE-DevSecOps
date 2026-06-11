@@ -7,9 +7,14 @@
 #   - transmet l'identité vérifiée du client à l'app via le XFCC standard ;
 #   - route le trafic en clair vers 127.0.0.1:9090 (l'app, localhost only).
 #
-# Le SPIRE Agent expose un serveur SDS sur son socket : Envoy y récupère
-# "spiffe://example.org/ns/shop/sa/analytics" (son cert) et "spiffe://example.org"
-# (le bundle de validation), tous deux renouvelés automatiquement.
+# Le SPIRE Agent expose un serveur SDS sur son socket. Envoy y récupère son
+# SVID via le nom de secret par défaut "default" (default_svid_name) et le
+# bundle du trust domain via "ROOTCA" (default_bundle_name), tous deux
+# renouvelés automatiquement. On ne demande PAS le SVID par son SPIFFE ID
+# littéral : SPIRE n'autorise alors la requête que si le nom correspond
+# exactement à une identité retournée au workload, ce qui échoue avec
+# "workload is not authorized for the requested identities". Les noms par
+# défaut sont servis sans cette contrainte.
 node:
   id: analytics
   cluster: shop
@@ -54,9 +59,10 @@ static_resources:
               # mTLS obligatoire : le client doit présenter un certificat valide.
               require_client_certificate: true
               common_tls_context:
-                # Notre SVID, servi par le SPIRE Agent via SDS.
+                # Notre SVID, servi par le SPIRE Agent via SDS sous le nom de
+                # secret par défaut "default" (default_svid_name de l'agent).
                 tls_certificate_sds_secret_configs:
-                  - name: "spiffe://example.org/ns/shop/sa/analytics"
+                  - name: "default"
                     sds_config:
                       resource_api_version: V3
                       api_config_source:
@@ -65,7 +71,9 @@ static_resources:
                         grpc_services:
                           - envoy_grpc: { cluster_name: spire_agent }
                 # Validation du pair via le bundle du trust domain (SDS),
-                # restreinte aux SVID du trust domain example.org.
+                # servi sous le nom de secret par défaut "ROOTCA"
+                # (default_bundle_name de l'agent), restreinte aux SVID du
+                # trust domain example.org.
                 combined_validation_context:
                   default_validation_context:
                     match_typed_subject_alt_names:
@@ -73,7 +81,7 @@ static_resources:
                         matcher:
                           prefix: "spiffe://example.org/"
                   validation_context_sds_secret_config:
-                    name: "spiffe://example.org"
+                    name: "ROOTCA"
                     sds_config:
                       resource_api_version: V3
                       api_config_source:
