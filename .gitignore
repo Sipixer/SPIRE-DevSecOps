@@ -1,8 +1,15 @@
 # Terraform
 .terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+terraform.tfvars
 crash.log
+
+# Ansible : inventaire généré par Terraform + kubeconfig récupéré
+infra/ansible/inventory.ini
+infra/ansible/kubeconfig
+*.retry
 
 # Binaires Go compilés
 services/orders/orders

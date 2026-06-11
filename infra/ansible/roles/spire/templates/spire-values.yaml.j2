@@ -1,0 +1,10 @@
+# Valeurs du chart spiffe/spire (helm-charts-hardened).
+# Rendu par Ansible. On surcharge le strict minimum ; les défauts du chart
+# sont déjà hardened (attestation PSAT, controller manager).
+global:
+  spire:
+    trustDomain: "{{ spire_trust_domain }}"
+    clusterName: "{{ spire_cluster_name }}"
+    # Désactive le strictMode qui exige des valeurs "production".
+    recommendations:
+      enabled: false
