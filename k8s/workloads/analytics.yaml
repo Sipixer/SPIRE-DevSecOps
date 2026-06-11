@@ -128,13 +128,15 @@ spec:
           volumeMounts:
             - { name: envoy-config, mountPath: /etc/envoy, readOnly: true }
             - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
-        # App Node.js : écoute sur 127.0.0.1:9090, atteinte seulement par Envoy.
+        # App Node.js : /event sur 127.0.0.1:9090 (atteint seulement par Envoy),
+        # /metrics sur :9100 (scrapé par Prometheus, comme les services Go).
         - name: analytics
           image: ghcr.io/sipixer/spire-devsecops/analytics:latest
           imagePullPolicy: Always
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
+          ports: [{ containerPort: 9100 }]
       volumes:
         - name: envoy-config
           configMap: { name: analytics-envoy }
@@ -147,4 +149,6 @@ kind: Service
 metadata: { name: analytics, namespace: shop }
 spec:
   selector: { app: analytics }
-  ports: [{ port: 8443, targetPort: 8443 }]
+  ports:
+    - { name: app, port: 8443, targetPort: 8443 }
+    - { name: metrics, port: 9100, targetPort: 9100 }

@@ -7,6 +7,7 @@ const http = require("http");
 
 const HOST = "127.0.0.1";
 const PORT = 9090;
+const METRICS_PORT = 9100;
 
 let eventsTotal = 0;
 const eventsByCaller = new Map();
@@ -65,3 +66,17 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`analytics: écoute sur http://${HOST}:${PORT} (derrière Envoy)`);
 });
+
+// Endpoint /metrics exposé au cluster (HTTP clair, comme les services Go) pour
+// que Prometheus le scrape. Pas de donnée sensible, jamais exposé hors cluster.
+http
+  .createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/metrics") {
+      res.writeHead(200, { "content-type": "text/plain; version=0.0.4" });
+      res.end(metrics());
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  })
+  .listen(METRICS_PORT, "0.0.0.0");
