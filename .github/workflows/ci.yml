@@ -1,0 +1,150 @@
+# Pipeline CI/CD sécurisée et bloquante.
+#
+# Étapes : lint IaC (tflint + Checkov) · SAST (Semgrep) · build + vet Go ·
+# build images · scan CVE (Trivy, bloquant) · push GHCR · signature (Cosign keyless).
+#
+# Un échec à n'importe quelle étape de sécurité casse le build (exit-code non nul),
+# ce qui est volontaire : c'est une porte de qualité, pas un avertissement.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR impose des chemins en minuscules.
+  IMAGE_PREFIX: ghcr.io/sipixer/spire-devsecops
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint de l'infrastructure as code (Terraform).
+  # ---------------------------------------------------------------------------
+  iac-lint:
+    name: Lint IaC (tflint + Checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform fmt + validate
+        run: |
+          cd terraform
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate
+
+      - name: tflint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+      - run: cd terraform && tflint --init && tflint -f compact
+
+      - name: Checkov (scan sécurité Terraform)
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform
+          framework: terraform
+          quiet: true
+          # Bloquant : une mauvaise config de sécurité casse le build.
+          soft_fail: false
+
+  # ---------------------------------------------------------------------------
+  # Analyse statique du code Go (SAST).
+  # ---------------------------------------------------------------------------
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    container: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep (rulesets Go + sécurité)
+        # scan local bloquant : --error fait sortir en code != 0 si une règle matche.
+        run: semgrep scan --config p/golang --config p/security-audit --error
+
+  # ---------------------------------------------------------------------------
+  # Compilation + vet des 4 services Go.
+  # ---------------------------------------------------------------------------
+  build-test:
+    name: Build & vet (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [gateway, orders, catalog, payments]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/${{ matrix.service }}/go.sum
+      - name: go vet + build
+        run: |
+          cd services/${{ matrix.service }}
+          go vet ./...
+          go build ./...
+
+  # ---------------------------------------------------------------------------
+  # Build images, scan CVE (bloquant), push GHCR, signature Cosign.
+  # Ne s'exécute que si lint + SAST + build sont verts, et seulement sur main.
+  # ---------------------------------------------------------------------------
+  image:
+    name: Image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [iac-lint, sast, build-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write   # push sur GHCR
+      id-token: write   # signature keyless Cosign (OIDC)
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [gateway, orders, catalog, payments]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Connexion à GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build de l'image (local, pour scan avant push)
+        uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          load: true
+          tags: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+
+      - name: Scan CVE (Trivy, bloquant sur HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"   # une CVE non corrigée casse le build
+
+      - name: Push vers GHCR (sha + latest)
+        uses: docker/build-push-action@v6
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest
+
+      - name: Cosign (signature keyless)
+        uses: sigstore/cosign-installer@v3
+      - name: Signer l'image
+        run: cosign sign --yes ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
