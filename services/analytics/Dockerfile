@@ -1,12 +1,9 @@
-# Pas de dépendances externes : on copie juste le source dans une image
-# distroless Node non-root. L'app écoute sur 127.0.0.1:9090 (Envoy est devant).
-FROM node:22-slim AS build
+# Pas de dépendances externes : on copie juste le source. Image Alpine minimale
+# (openssl patché rapidement) en non-root. Écoute sur 127.0.0.1:9090, Envoy devant.
+FROM node:22-alpine
 WORKDIR /app
 COPY package.json main.js ./
-
-FROM gcr.io/distroless/nodejs22-debian12:nonroot
-WORKDIR /app
-COPY --from=build /app /app
-USER nonroot
+RUN apk -U upgrade --no-cache
+USER node
 EXPOSE 9090
-CMD ["main.js"]
+CMD ["node", "main.js"]
