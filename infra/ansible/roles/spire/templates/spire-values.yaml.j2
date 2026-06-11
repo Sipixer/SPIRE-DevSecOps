@@ -8,3 +8,15 @@ global:
     # Désactive le strictMode qui exige des valeurs "production".
     recommendations:
       enabled: false
+
+# Active la section SDS du SPIRE Agent (désactivée par défaut dans le chart).
+# Sans ça, l'agent ne résout pas les noms de secrets demandés par Envoy et
+# renvoie "workload is not authorized for the requested identities".
+# Noms par défaut attendus par le sidecar Envoy du service analytics :
+#   - SVID exposé sous "default", bundle du trust domain sous "ROOTCA".
+spire-agent:
+  sds:
+    enabled: true
+    defaultSVIDName: "default"
+    defaultBundleName: "ROOTCA"
+    defaultAllBundlesName: "ALL"
