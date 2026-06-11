@@ -33,6 +33,10 @@ var policy = map[string][]string{
 	"/_calls":   {gatewayID},
 }
 
+// authzDisabled coupe la décision par route : l'identité reste lue et
+// journalisée (mTLS actif), mais tout appelant du trust domain est autorisé.
+var authzDisabled bool
+
 var products = []map[string]any{
 	{"id": 1, "name": "Clé USB chiffrée", "price": 29},
 	{"id": 2, "name": "YubiKey 5", "price": 55},
@@ -71,6 +75,7 @@ func (l *callLog) snapshot() []callEntry {
 func main() {
 	ctx := context.Background()
 	socketPath := getenv("SPIFFE_ENDPOINT_SOCKET", "unix:///run/spire/sockets/spire-agent.sock")
+	authzDisabled = os.Getenv("AUTHZ_DISABLED") == "true"
 
 	source, err := workloadapi.NewX509Source(ctx,
 		workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
@@ -109,7 +114,7 @@ func main() {
 func guard(route string, logbook *callLog, h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := callerID(r)
-		allowed := slices.Contains(policy[route], caller)
+		allowed := authzDisabled || slices.Contains(policy[route], caller)
 		recordAuthz(allowed)
 		// /_calls est une route d'introspection (lecture du journal par le front) ;
 		// on ne la journalise pas pour ne pas noyer les vrais appels métier.
