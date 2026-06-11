@@ -1,0 +1,186 @@
+# Namespace de la boutique + les 4 services.
+# Chaque service a son propre ServiceAccount : c'est lui qui détermine le
+# SPIFFE ID attribué par SPIRE (spiffe://example.org/ns/shop/sa/<name>).
+#
+# Chaîne d'appels (tout en mTLS sauf le navigateur -> Gateway en HTTP) :
+#   navigateur --HTTP--> gateway --mTLS--> orders --mTLS--> payments
+#                        gateway --mTLS--> catalog
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+---
+# --- ServiceAccounts (= identités SPIFFE) ---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: gateway, namespace: shop }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: orders, namespace: shop }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: catalog, namespace: shop }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: payments, namespace: shop }
+---
+# --- Payments : serveur mTLS, n'autorise qu'Orders ---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: payments, namespace: shop, labels: { app: payments } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: payments } }
+  template:
+    metadata: { labels: { app: payments } }
+    spec:
+      serviceAccountName: payments
+      containers:
+        - name: payments
+          image: shop/payments:dev
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          ports: [{ containerPort: 8443 }]
+          env:
+            - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
+          volumeMounts:
+            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
+      volumes:
+        # Le SPIFFE CSI driver monte le socket du Workload API en lecture seule.
+        - name: spire-agent-socket
+          csi: { driver: csi.spiffe.io, readOnly: true }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: payments, namespace: shop }
+spec:
+  selector: { app: payments }
+  ports: [{ port: 8443, targetPort: 8443 }]
+---
+# --- Catalog : serveur mTLS, n'autorise que la Gateway ---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: catalog, namespace: shop, labels: { app: catalog } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: catalog } }
+  template:
+    metadata: { labels: { app: catalog } }
+    spec:
+      serviceAccountName: catalog
+      containers:
+        - name: catalog
+          image: shop/catalog:dev
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          ports: [{ containerPort: 8443 }]
+          env:
+            - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
+          volumeMounts:
+            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
+      volumes:
+        - name: spire-agent-socket
+          csi: { driver: csi.spiffe.io, readOnly: true }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: catalog, namespace: shop }
+spec:
+  selector: { app: catalog }
+  ports: [{ port: 8443, targetPort: 8443 }]
+---
+# --- Orders : serveur mTLS (autorise Gateway) + client mTLS vers Payments ---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: orders, namespace: shop, labels: { app: orders } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: orders } }
+  template:
+    metadata: { labels: { app: orders } }
+    spec:
+      serviceAccountName: orders
+      containers:
+        - name: orders
+          image: shop/orders:dev
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          ports: [{ containerPort: 8443 }]
+          env:
+            - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
+            - { name: PAYMENTS_URL, value: https://payments.shop.svc.cluster.local:8443/pay }
+          volumeMounts:
+            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
+      volumes:
+        - name: spire-agent-socket
+          csi: { driver: csi.spiffe.io, readOnly: true }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: orders, namespace: shop }
+spec:
+  selector: { app: orders }
+  ports: [{ port: 8443, targetPort: 8443 }]
+---
+# --- Gateway : porte d'entrée. HTTP côté navigateur, mTLS vers Orders/Catalog ---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: gateway, namespace: shop, labels: { app: gateway } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: gateway } }
+  template:
+    metadata: { labels: { app: gateway } }
+    spec:
+      serviceAccountName: gateway
+      containers:
+        - name: gateway
+          image: shop/gateway:dev
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          ports: [{ containerPort: 8080 }]
+          env:
+            - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
+            - { name: ORDERS_URL, value: https://orders.shop.svc.cluster.local:8443 }
+            - { name: CATALOG_URL, value: https://catalog.shop.svc.cluster.local:8443 }
+          volumeMounts:
+            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
+      volumes:
+        - name: spire-agent-socket
+          csi: { driver: csi.spiffe.io, readOnly: true }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: gateway, namespace: shop }
+spec:
+  selector: { app: gateway }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+# Expose la Gateway au navigateur via l'ingress Traefik de k3d.
+# (le cluster a été créé avec --port "8080:80@loadbalancer")
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gateway
+  namespace: shop
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port: { number: 8080 }

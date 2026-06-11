@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPIRE Zero-Trust mTLS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="masthead">
+      <span class="eyebrow">SPIFFE / SPIRE · mTLS</span>
+      <h1>Zero-Trust mTLS — démo</h1>
+      <p>Chaque appel entre services est authentifié par une identité cryptographique
+         (SPIFFE&nbsp;ID) lue dans le certificat. Aucun secret partagé. L'autorisation
+         est appliquée route par route.</p>
+    </header>
+
+    <section class="topology" aria-label="Topologie des services">
+      <div class="node" data-id="gateway"><span class="name"><span class="dot"></span>Gateway</span><span class="role">porte d'entrée</span></div>
+      <span class="sep">→</span>
+      <div class="node" data-id="orders"><span class="name"><span class="dot"></span>Orders</span><span class="role">commandes</span></div>
+      <span class="sep">→</span>
+      <div class="node" data-id="payments"><span class="name"><span class="dot"></span>Payments</span><span class="role">service sensible</span></div>
+      <div class="node catalog" data-id="catalog"><span class="name"><span class="dot"></span>Catalog</span><span class="role">produits · appelé par la Gateway</span></div>
+    </section>
+
+    <section class="scenarios">
+      <div class="panel">
+        <h2 class="title">Scénarios autorisés</h2>
+        <button class="btn ok" data-scn="order" onclick="run(this,'/api/order','POST','Passer une commande')">
+          <span class="ico">✓</span>
+          <span>Passer une commande<br><span class="sub">Gateway → Orders → Payments</span></span>
+        </button>
+        <button class="btn ok" data-scn="products" onclick="run(this,'/api/products','GET','Voir le catalogue')">
+          <span class="ico">✓</span>
+          <span>Voir le catalogue<br><span class="sub">Gateway → Catalog</span></span>
+        </button>
+      </div>
+      <div class="panel">
+        <h2 class="title">Scénario refusé</h2>
+        <button class="btn ko" data-scn="forbidden" onclick="run(this,'/api/forbidden','POST','Appel interdit vers Payments')">
+          <span class="ico">✕</span>
+          <span>Tenter un appel interdit<br><span class="sub">Gateway → Payments /pay</span></span>
+        </button>
+        <p class="note">La Gateway est authentifiée (membre du trust domain) mais n'a pas le
+        droit d'appeler <code>/pay</code> — route réservée à Orders. Résultat&nbsp;: refusé.</p>
+      </div>
+    </section>
+
+    <main class="columns">
+      <section class="block">
+        <h2 class="title">
+          Historique
+          <span class="toolbar">
+            <button class="link" onclick="clearHistory()">effacer</button>
+          </span>
+        </h2>
+        <div class="filter" role="tablist">
+          <button class="active" data-f="all" onclick="setFilter('all',this)">Tous</button>
+          <button data-f="ok" onclick="setFilter('ok',this)">Autorisés</button>
+          <button data-f="ko" onclick="setFilter('ko',this)">Refusés</button>
+        </div>
+        <div id="history"></div>
+        <div id="history-empty" class="placeholder">Lance un scénario pour voir un résultat ici.</div>
+      </section>
+
+      <section class="block">
+        <h2 class="title">
+          Journaux des services
+          <span class="toolbar">
+            <label class="toggle"><input type="checkbox" id="auto" checked onchange="toggleAuto(this)"> auto</label>
+            <button class="link" onclick="loadCalls()">↻</button>
+          </span>
+        </h2>
+        <div id="calls"><div class="placeholder">—</div></div>
+      </section>
+    </main>
+
+    <footer>
+      Trust domain <code>example.org</code> · identités <code>spiffe://example.org/ns/shop/sa/&lt;service&gt;</code>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
