@@ -1,0 +1,35 @@
+---
+# Installe k3s (Kubernetes léger) et les outils nécessaires au déploiement.
+
+- name: Paquets de base
+  ansible.builtin.apt:
+    name: [curl, ca-certificates]
+    state: present
+    update_cache: true
+
+- name: Installer k3s (single-node, sans traefik si on veut notre propre ingress)
+  ansible.builtin.shell:
+    cmd: curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
+    creates: /usr/local/bin/k3s
+
+- name: Attendre que le nœud soit Ready
+  ansible.builtin.shell:
+    cmd: k3s kubectl wait --for=condition=Ready node --all --timeout=120s
+  changed_when: false
+
+- name: Installer Helm
+  ansible.builtin.shell:
+    cmd: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    creates: /usr/local/bin/helm
+
+- name: Exposer KUBECONFIG pour les tâches suivantes
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    line: "KUBECONFIG=/etc/rancher/k3s/k3s.yaml"
+    create: true
+
+- name: Récupérer le kubeconfig en local (pour debug/kubectl depuis le Mac)
+  ansible.builtin.fetch:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ playbook_dir }}/kubeconfig"
+    flat: true

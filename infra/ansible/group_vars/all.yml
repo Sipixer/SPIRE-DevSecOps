@@ -1,0 +1,23 @@
+---
+# Variables partagées par tous les rôles.
+
+# --- SPIRE ---
+spire_trust_domain: "example.org"
+spire_cluster_name: "spire"
+spire_namespace: "spire"
+spire_chart_version: "0.29.0"
+spire_crds_chart_version: "0.5.0"
+spire_helm_repo: "https://spiffe.github.io/helm-charts-hardened/"
+
+# --- ArgoCD ---
+argocd_namespace: "argocd"
+argocd_chart_version: "7.7.7"
+argocd_helm_repo: "https://argoproj.github.io/argo-helm"
+
+# Dépôt Git surveillé par ArgoCD (la "bonne partie" = le dossier des manifests).
+gitops_repo_url: "https://github.com/Sipixer/SPIRE-DevSecOps.git"
+gitops_repo_revision: "main"
+gitops_repo_path: "k8s"
+
+# --- Apps (namespace métier) ---
+shop_namespace: "shop"

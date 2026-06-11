@@ -40,8 +40,8 @@ spec:
       serviceAccountName: payments
       containers:
         - name: payments
-          image: shop/payments:dev
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/sipixer/spire-devsecops/payments:latest
+          imagePullPolicy: Always
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
@@ -75,8 +75,8 @@ spec:
       serviceAccountName: catalog
       containers:
         - name: catalog
-          image: shop/catalog:dev
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/sipixer/spire-devsecops/catalog:latest
+          imagePullPolicy: Always
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
@@ -109,8 +109,8 @@ spec:
       serviceAccountName: orders
       containers:
         - name: orders
-          image: shop/orders:dev
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/sipixer/spire-devsecops/orders:latest
+          imagePullPolicy: Always
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
@@ -144,8 +144,8 @@ spec:
       serviceAccountName: gateway
       containers:
         - name: gateway
-          image: shop/gateway:dev
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/sipixer/spire-devsecops/gateway:latest
+          imagePullPolicy: Always
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
@@ -167,8 +167,7 @@ spec:
   selector: { app: gateway }
   ports: [{ port: 8080, targetPort: 8080 }]
 ---
-# Expose la Gateway au navigateur via l'ingress Traefik de k3d.
-# (le cluster a été créé avec --port "8080:80@loadbalancer")
+# Expose la Gateway au navigateur via l'ingress Traefik (inclus dans k3s).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
