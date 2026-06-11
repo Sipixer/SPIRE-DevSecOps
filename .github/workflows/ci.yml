@@ -37,8 +37,8 @@ jobs:
           terraform_wrapper: false
 
       - name: terraform fmt + validate
+        working-directory: infra/terraform
         run: |
-          cd terraform
           terraform fmt -check -recursive
           terraform init -backend=false
           terraform validate
@@ -47,12 +47,12 @@ jobs:
         uses: terraform-linters/setup-tflint@v4
         with:
           tflint_version: latest
-      - run: cd terraform && tflint --init && tflint -f compact
+      - run: cd infra/terraform && tflint --init && tflint -f compact
 
       - name: Checkov (scan sécurité Terraform)
         uses: bridgecrewio/checkov-action@master
         with:
-          directory: terraform
+          directory: infra/terraform
           framework: terraform
           quiet: true
           # Bloquant : une mauvaise config de sécurité casse le build.
