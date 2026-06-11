@@ -16,3 +16,7 @@ services/orders/orders
 services/payments/payments
 services/catalog/catalog
 services/gateway/gateway
+
+# Node
+node_modules/
+services/analytics/analytics

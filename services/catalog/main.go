@@ -25,8 +25,9 @@ const (
 )
 
 // policy : qui peut appeler quelle route.
-//   /products : lister les produits — réservé à la Gateway.
-//   /_calls   : consulter le journal — réservé à la Gateway (pour le front).
+//
+//	/products : lister les produits — réservé à la Gateway.
+//	/_calls   : consulter le journal — réservé à la Gateway (pour le front).
 var policy = map[string][]string{
 	"/products": {gatewayID},
 	"/_calls":   {gatewayID},
@@ -86,6 +87,8 @@ func main() {
 
 	logbook := &callLog{}
 
+	go serveMetrics()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/products", guard("/products", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
 		log.Printf("catalog: produits servis à %s", caller)
@@ -107,6 +110,7 @@ func guard(route string, logbook *callLog, h func(http.ResponseWriter, *http.Req
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := callerID(r)
 		allowed := slices.Contains(policy[route], caller)
+		recordAuthz(allowed)
 		// /_calls est une route d'introspection (lecture du journal par le front) ;
 		// on ne la journalise pas pour ne pas noyer les vrais appels métier.
 		if route != "/_calls" {
@@ -114,12 +118,14 @@ func guard(route string, logbook *callLog, h func(http.ResponseWriter, *http.Req
 		}
 		if !allowed {
 			log.Printf("catalog: %s REFUSÉ sur %s", caller, route)
+			recordRequest(route, http.StatusForbidden)
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"allowed": false, "route": route, "caller": caller,
 				"reason": "identité non autorisée pour cette route",
 			})
 			return
 		}
+		recordRequest(route, http.StatusOK)
 		h(w, r, caller)
 	}
 }

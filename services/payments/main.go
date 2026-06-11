@@ -1,7 +1,7 @@
 // Payments est un service sensible. L'autorisation se fait à deux niveaux :
-//   1. au handshake mTLS : on n'accepte que les identités du trust domain ;
-//   2. par route, dans le code : chaque route déclare qui a le droit de l'appeler,
-//      l'identité étant lue dans le certificat client (non falsifiable).
+//  1. au handshake mTLS : on n'accepte que les identités du trust domain ;
+//  2. par route, dans le code : chaque route déclare qui a le droit de l'appeler,
+//     l'identité étant lue dans le certificat client (non falsifiable).
 package main
 
 import (
@@ -30,8 +30,9 @@ const (
 )
 
 // policy déclare, pour chaque route, la liste blanche des appelants autorisés.
-//   /pay     : déclencher un paiement — réservé à Orders.
-//   /_calls  : consulter le journal d'appels — réservé à la Gateway (pour le front).
+//
+//	/pay     : déclencher un paiement — réservé à Orders.
+//	/_calls  : consulter le journal d'appels — réservé à la Gateway (pour le front).
 var policy = map[string][]string{
 	"/pay":    {ordersID},
 	"/_calls": {gatewayID},
@@ -85,6 +86,8 @@ func main() {
 
 	logbook := &callLog{}
 
+	go serveMetrics()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/pay", guard("/pay", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
 		log.Printf("payments: paiement autorisé pour %s", caller)
@@ -110,6 +113,7 @@ func guard(route string, logbook *callLog, h func(http.ResponseWriter, *http.Req
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := callerID(r)
 		allowed := slices.Contains(policy[route], caller)
+		recordAuthz(allowed)
 		// /_calls est une route d'introspection (lecture du journal par le front) ;
 		// on ne la journalise pas pour ne pas noyer les vrais appels métier.
 		if route != "/_calls" {
@@ -117,12 +121,14 @@ func guard(route string, logbook *callLog, h func(http.ResponseWriter, *http.Req
 		}
 		if !allowed {
 			log.Printf("payments: %s REFUSÉ sur %s", caller, route)
+			recordRequest(route, http.StatusForbidden)
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"allowed": false, "route": route, "caller": caller,
 				"reason": "identité non autorisée pour cette route",
 			})
 			return
 		}
+		recordRequest(route, http.StatusOK)
 		h(w, r, caller)
 	}
 }

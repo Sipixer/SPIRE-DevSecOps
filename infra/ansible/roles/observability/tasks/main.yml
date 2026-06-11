@@ -1,0 +1,48 @@
+---
+- name: Repo Helm prometheus-community
+  ansible.builtin.command: helm repo add prometheus-community {{ prometheus_helm_repo }} --force-update
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+
+- name: helm repo update
+  ansible.builtin.command: helm repo update prometheus-community
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+
+- name: Values kube-prometheus-stack
+  ansible.builtin.template:
+    src: kps-values.yaml.j2
+    dest: /tmp/kps-values.yaml
+    mode: "0644"
+
+- name: Installer kube-prometheus-stack (Prometheus + Grafana)
+  ansible.builtin.command: >-
+    helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack
+    --version {{ kube_prometheus_stack_chart_version }}
+    --namespace {{ monitoring_namespace }} --create-namespace
+    --values /tmp/kps-values.yaml
+    --wait --timeout 8m
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+  changed_when: true
+
+- name: Rendre le dashboard Grafana
+  ansible.builtin.template:
+    src: dashboard-spire-zerotrust.json.j2
+    dest: /tmp/spire-zerotrust.json
+    mode: "0644"
+
+- name: ConfigMap du dashboard SPIRE / Zero-trust
+  ansible.builtin.shell:
+    cmd: |
+      k3s kubectl create configmap grafana-dashboard-spire \
+        --namespace {{ monitoring_namespace }} \
+        --from-file=spire-zerotrust.json=/tmp/spire-zerotrust.json \
+        --dry-run=client -o yaml | k3s kubectl apply -f -
+  changed_when: true
+
+- name: Label grafana_dashboard sur la ConfigMap
+  ansible.builtin.command: >-
+    k3s kubectl label configmap grafana-dashboard-spire
+    --namespace {{ monitoring_namespace }}
+    grafana_dashboard=1 --overwrite
+  changed_when: true

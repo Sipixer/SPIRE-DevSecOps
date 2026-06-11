@@ -45,7 +45,7 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-          ports: [{ containerPort: 8443 }]
+          ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
           env:
             - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
           volumeMounts:
@@ -60,7 +60,7 @@ kind: Service
 metadata: { name: payments, namespace: shop }
 spec:
   selector: { app: payments }
-  ports: [{ port: 8443, targetPort: 8443 }]
+  ports: [{ name: app, port: 8443, targetPort: 8443 }, { name: metrics, port: 9100, targetPort: 9100 }]
 ---
 # --- Catalog : serveur mTLS, n'autorise que la Gateway ---
 apiVersion: apps/v1
@@ -80,7 +80,7 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-          ports: [{ containerPort: 8443 }]
+          ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
           env:
             - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
           volumeMounts:
@@ -94,7 +94,7 @@ kind: Service
 metadata: { name: catalog, namespace: shop }
 spec:
   selector: { app: catalog }
-  ports: [{ port: 8443, targetPort: 8443 }]
+  ports: [{ name: app, port: 8443, targetPort: 8443 }, { name: metrics, port: 9100, targetPort: 9100 }]
 ---
 # --- Orders : serveur mTLS (autorise Gateway) + client mTLS vers Payments ---
 apiVersion: apps/v1
@@ -114,7 +114,7 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-          ports: [{ containerPort: 8443 }]
+          ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
           env:
             - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
             - { name: PAYMENTS_URL, value: https://payments.shop.svc.cluster.local:8443/pay }
@@ -129,7 +129,7 @@ kind: Service
 metadata: { name: orders, namespace: shop }
 spec:
   selector: { app: orders }
-  ports: [{ port: 8443, targetPort: 8443 }]
+  ports: [{ name: app, port: 8443, targetPort: 8443 }, { name: metrics, port: 9100, targetPort: 9100 }]
 ---
 # --- Gateway : porte d'entrée. HTTP côté navigateur, mTLS vers Orders/Catalog ---
 apiVersion: apps/v1
@@ -149,7 +149,7 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-          ports: [{ containerPort: 8080 }]
+          ports: [{ containerPort: 8080 }, { containerPort: 9100 }]
           env:
             - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
             - { name: ORDERS_URL, value: https://orders.shop.svc.cluster.local:8443 }
@@ -165,7 +165,7 @@ kind: Service
 metadata: { name: gateway, namespace: shop }
 spec:
   selector: { app: gateway }
-  ports: [{ port: 8080, targetPort: 8080 }]
+  ports: [{ name: app, port: 8080, targetPort: 8080 }, { name: metrics, port: 9100, targetPort: 9100 }]
 ---
 # Expose la Gateway au navigateur via l'ingress Traefik (inclus dans k3s).
 apiVersion: networking.k8s.io/v1

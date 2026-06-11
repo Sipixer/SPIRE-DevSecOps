@@ -109,7 +109,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [gateway, orders, catalog, payments]
+        service: [gateway, orders, catalog, payments, analytics]
     steps:
       - uses: actions/checkout@v4
 
@@ -148,3 +148,45 @@ jobs:
         uses: sigstore/cosign-installer@v3
       - name: Signer l'image
         run: cosign sign --yes ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+
+  # ---------------------------------------------------------------------------
+  # CD GitOps : met à jour la branche deploy/prod avec les images taggées par
+  # SHA. ArgoCD surveille cette branche et synchronise le cluster. Pas de
+  # déploiement direct : Git est la source de vérité.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Bump deploy/prod
+    runs-on: ubuntu-latest
+    needs: [image]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Préparer la branche deploy/prod
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B deploy/prod
+
+      - name: Installer kustomize
+        run: |
+          curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.5.0/kustomize_v5.5.0_linux_amd64.tar.gz" \
+            | tar xz -C /usr/local/bin
+
+      - name: Épingler les images au SHA du commit
+        working-directory: k8s/workloads
+        run: |
+          for svc in gateway orders catalog payments analytics; do
+            kustomize edit set image ${IMAGE_PREFIX}/$svc=${IMAGE_PREFIX}/$svc:${GITHUB_SHA}
+          done
+
+      - name: Commit + push sur deploy/prod
+        run: |
+          git add k8s/workloads/kustomization.yaml
+          git commit -m "deploy: images @ ${GITHUB_SHA:0:7}" || echo "rien à committer"
+          git push -f origin deploy/prod

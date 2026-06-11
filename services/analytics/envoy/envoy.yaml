@@ -1,0 +1,112 @@
+# Envoy sidecar d'Analytics.
+#
+# Rôle : terminer le mTLS SPIFFE à la place de l'app Node.js.
+#   - récupère son SVID et le bundle du trust domain via SDS, auprès du
+#     SPIRE Agent (socket Workload API monté par le CSI driver) ;
+#   - n'accepte que les pairs du trust domain example.org ;
+#   - transmet l'identité vérifiée du client à l'app via le XFCC standard ;
+#   - route le trafic en clair vers 127.0.0.1:9090 (l'app, localhost only).
+#
+# Le SPIRE Agent expose un serveur SDS sur son socket : Envoy y récupère
+# "spiffe://example.org/ns/shop/sa/analytics" (son cert) et "spiffe://example.org"
+# (le bundle de validation), tous deux renouvelés automatiquement.
+node:
+  id: analytics
+  cluster: shop
+
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9901 }
+
+static_resources:
+  listeners:
+    - name: mtls_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8443 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: analytics
+                # Transmet l'identité du pair (URI SAN du cert client) à l'app
+                # via x-forwarded-client-cert. L'app lit ce header, contrôlé
+                # par Envoy et donc non falsifiable depuis l'extérieur.
+                forward_client_cert_details: SANITIZE_SET
+                set_current_client_cert_details:
+                  uri: true
+                route_config:
+                  name: local
+                  virtual_hosts:
+                    - name: analytics
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: analytics_app }
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              # mTLS obligatoire : le client doit présenter un certificat valide.
+              require_client_certificate: true
+              common_tls_context:
+                # Notre SVID, servi par le SPIRE Agent via SDS.
+                tls_certificate_sds_secret_configs:
+                  - name: "spiffe://example.org/ns/shop/sa/analytics"
+                    sds_config:
+                      resource_api_version: V3
+                      api_config_source:
+                        api_type: GRPC
+                        transport_api_version: V3
+                        grpc_services:
+                          - envoy_grpc: { cluster_name: spire_agent }
+                # Validation du pair via le bundle du trust domain (SDS),
+                # restreinte aux SVID du trust domain example.org.
+                combined_validation_context:
+                  default_validation_context:
+                    match_typed_subject_alt_names:
+                      - san_type: URI
+                        matcher:
+                          prefix: "spiffe://example.org/"
+                  validation_context_sds_secret_config:
+                    name: "spiffe://example.org"
+                    sds_config:
+                      resource_api_version: V3
+                      api_config_source:
+                        api_type: GRPC
+                        transport_api_version: V3
+                        grpc_services:
+                          - envoy_grpc: { cluster_name: spire_agent }
+
+  clusters:
+    # Cluster gRPC vers le SPIRE Agent (socket Workload API / SDS).
+    - name: spire_agent
+      type: STATIC
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: spire_agent
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    pipe:
+                      path: /run/spire/sockets/spire-agent.sock
+
+    # L'app Node.js locale, en clair.
+    - name: analytics_app
+      type: STATIC
+      load_assignment:
+        cluster_name: analytics_app
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: 127.0.0.1, port_value: 9090 }

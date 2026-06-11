@@ -1,0 +1,150 @@
+# Analytics : service applicatif Node.js placé derrière un sidecar Envoy.
+#
+# Contrairement aux services Go, l'app ne manipule pas SPIFFE : c'est Envoy qui
+# porte le mTLS. Le pod a deux conteneurs partageant la loopback :
+#   - envoy     : écoute en mTLS sur :8443, récupère son SVID via SDS auprès du
+#                 SPIRE Agent, vérifie le pair, route vers 127.0.0.1:9090 ;
+#   - analytics : l'app Node.js, écoute sur 127.0.0.1:9090 (localhost only).
+#
+# Le ServiceAccount "analytics" détermine l'identité SPIFFE attribuée par SPIRE :
+# spiffe://example.org/ns/shop/sa/analytics. Envoy s'en sert via SDS.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: analytics, namespace: shop }
+---
+# Config Envoy montée dans le sidecar.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: analytics-envoy, namespace: shop }
+data:
+  envoy.yaml: |
+    node:
+      id: analytics
+      cluster: shop
+    admin:
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 9901 }
+    static_resources:
+      listeners:
+        - name: mtls_listener
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 8443 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: analytics
+                    forward_client_cert_details: SANITIZE_SET
+                    set_current_client_cert_details:
+                      uri: true
+                    route_config:
+                      name: local
+                      virtual_hosts:
+                        - name: analytics
+                          domains: ["*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              route: { cluster: analytics_app }
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+              transport_socket:
+                name: envoy.transport_sockets.tls
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+                  require_client_certificate: true
+                  common_tls_context:
+                    tls_certificate_sds_secret_configs:
+                      - name: "spiffe://example.org/ns/shop/sa/analytics"
+                        sds_config:
+                          resource_api_version: V3
+                          api_config_source:
+                            api_type: GRPC
+                            transport_api_version: V3
+                            grpc_services:
+                              - envoy_grpc: { cluster_name: spire_agent }
+                    combined_validation_context:
+                      default_validation_context:
+                        match_typed_subject_alt_names:
+                          - san_type: URI
+                            matcher:
+                              prefix: "spiffe://example.org/"
+                      validation_context_sds_secret_config:
+                        name: "spiffe://example.org"
+                        sds_config:
+                          resource_api_version: V3
+                          api_config_source:
+                            api_type: GRPC
+                            transport_api_version: V3
+                            grpc_services:
+                              - envoy_grpc: { cluster_name: spire_agent }
+      clusters:
+        - name: spire_agent
+          type: STATIC
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config:
+                http2_protocol_options: {}
+          load_assignment:
+            cluster_name: spire_agent
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        pipe:
+                          path: /run/spire/sockets/spire-agent.sock
+        - name: analytics_app
+          type: STATIC
+          load_assignment:
+            cluster_name: analytics_app
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 9090 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: analytics, namespace: shop, labels: { app: analytics } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: analytics } }
+  template:
+    metadata: { labels: { app: analytics } }
+    spec:
+      serviceAccountName: analytics
+      containers:
+        # Sidecar Envoy : porte le mTLS SPIFFE et expose :8443.
+        - name: envoy
+          image: envoyproxy/envoy:v1.31-latest
+          args: ["-c", "/etc/envoy/envoy.yaml"]
+          resources:
+            requests: { cpu: 25m, memory: 48Mi }
+            limits: { cpu: 200m, memory: 192Mi }
+          ports: [{ containerPort: 8443 }]
+          volumeMounts:
+            - { name: envoy-config, mountPath: /etc/envoy, readOnly: true }
+            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
+        # App Node.js : écoute sur 127.0.0.1:9090, atteinte seulement par Envoy.
+        - name: analytics
+          image: ghcr.io/sipixer/spire-devsecops/analytics:latest
+          imagePullPolicy: Always
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+      volumes:
+        - name: envoy-config
+          configMap: { name: analytics-envoy }
+        # Le SPIFFE CSI driver monte le socket du Workload API en lecture seule.
+        - name: spire-agent-socket
+          csi: { driver: csi.spiffe.io, readOnly: true }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: analytics, namespace: shop }
+spec:
+  selector: { app: analytics }
+  ports: [{ port: 8443, targetPort: 8443 }]

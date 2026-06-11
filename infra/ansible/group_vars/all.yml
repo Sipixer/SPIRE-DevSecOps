@@ -14,10 +14,25 @@ argocd_namespace: "argocd"
 argocd_chart_version: "7.7.7"
 argocd_helm_repo: "https://argoproj.github.io/argo-helm"
 
-# Dépôt Git surveillé par ArgoCD (la "bonne partie" = le dossier des manifests).
+# Dépôt Git surveillé par ArgoCD : la branche deploy/prod contient l'état
+# déployé (images taggées par SHA, mises à jour par la CI). Jamais main.
 gitops_repo_url: "https://github.com/Sipixer/SPIRE-DevSecOps.git"
-gitops_repo_revision: "main"
-gitops_repo_path: "k8s"
+gitops_repo_revision: "deploy/prod"
+gitops_repo_path: "k8s/workloads"
 
 # --- Apps (namespace métier) ---
 shop_namespace: "shop"
+
+# --- Observabilité (Prometheus + Grafana) ---
+monitoring_namespace: "monitoring"
+kube_prometheus_stack_chart_version: "65.5.1"
+prometheus_helm_repo: "https://prometheus-community.github.io/helm-charts"
+# Host Traefik qui sert Grafana (catch-all : on passe par un Host dédié car
+# l'ingress Gateway capte déjà "/" sans host). Adapter au domaine du VPS.
+grafana_host: "grafana.localhost"
+grafana_admin_user: "admin"
+grafana_admin_password: "admin"
+# Ports /metrics des services métier (HTTP en clair, interne au cluster).
+metrics_port: 9100
+# Liste des services Go scrappés sur leur port /metrics HTTP dédié.
+metrics_services: [gateway, orders, catalog, payments, analytics]

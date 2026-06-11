@@ -1,0 +1,111 @@
+# Valeurs kube-prometheus-stack, rendues par Ansible.
+# Stack allégée pour un petit VPS (cpx32 4 vCPU / 8 Go) : alertmanager off,
+# rétention courte, ressources réduites, composants non essentiels désactivés.
+
+# --- Composants désactivés (économie mémoire) ---
+alertmanager:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true
+prometheusOperator:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+# Probes/composants du control-plane k3s souvent non exposés : on les coupe
+# pour éviter des targets DOWN bruyantes.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+# --- Prometheus allégé ---
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    retentionSize: "2GB"
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    resources:
+      requests: { cpu: 100m, memory: 384Mi }
+      limits: { cpu: 500m, memory: 768Mi }
+    # On veut scraper TOUS les ServiceMonitors/PodMonitors, pas seulement
+    # ceux portant le label de la release.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    # Stockage éphémère (emptyDir) : pas de PVC, suffisant pour la démo.
+    storageSpec: {}
+    # Scrape des services métier du namespace shop sur leur port /metrics HTTP
+    # dédié ({{ metrics_port }}, en clair). Les ports applicatifs (8443) sont en
+    # mTLS et ne sont pas scrapés directement.
+    additionalScrapeConfigs:
+      - job_name: shop-services
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [{{ shop_namespace }}]
+        relabel_configs:
+          # Ne garde que les endpoints du port nommé "metrics".
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+          - source_labels: [__meta_kubernetes_service_name]
+            target_label: service
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+      # Fallback générique : tout pod annoté prometheus.io/scrape=true.
+      - job_name: annotated-pods
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+
+# --- Grafana ---
+grafana:
+  adminUser: "{{ grafana_admin_user }}"
+  adminPassword: "{{ grafana_admin_password }}"
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 300m, memory: 256Mi }
+  persistence:
+    enabled: false
+  # Exposé via l'ingress Traefik de k3s sur un Host dédié.
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - "{{ grafana_host }}"
+    path: /
+    pathType: Prefix
+  # Charge les dashboards déclarés via ConfigMap (label grafana_dashboard=1).
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: "{{ monitoring_namespace }}"
+    datasources:
+      enabled: true
