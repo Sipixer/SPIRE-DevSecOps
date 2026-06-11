@@ -1,0 +1,11 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Binaires Go compilés
+services/orders/orders
+services/payments/payments
+services/catalog/catalog
+services/gateway/gateway
