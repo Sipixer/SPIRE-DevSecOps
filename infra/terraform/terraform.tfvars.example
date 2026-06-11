@@ -1,9 +1,0 @@
-# Copier en terraform.tfvars (gitignored) ou fournir via Terraform Cloud.
-# hcloud_token est un secret : ne JAMAIS le committer — le mettre en variable
-# sensible dans le workspace Terraform Cloud.
-
-# hcloud_token   = "..."   # via Terraform Cloud (variable sensible)
-ssh_public_key   = "ssh-ed25519 AAAA... ton-email@example.com"
-allowed_ssh_cidr = "0.0.0.0/0" # idéalement ton IP : "1.2.3.4/32"
-server_type      = "cx32"
-location         = "nbg1"

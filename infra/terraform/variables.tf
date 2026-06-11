@@ -11,15 +11,15 @@ variable "server_name" {
 }
 
 variable "server_type" {
-  description = "Type de serveur Hetzner (CX32 = 4 vCPU / 8 Go)"
+  description = "Type de serveur Hetzner (cpx32 = 4 vCPU / 8 Go, AMD x86)"
   type        = string
-  default     = "cx32"
+  default     = "cpx32"
 }
 
 variable "location" {
-  description = "Datacenter Hetzner (nbg1 Nuremberg, fsn1 Falkenstein, hel1 Helsinki)"
+  description = "Datacenter Hetzner (fsn1 Falkenstein, nbg1 Nuremberg, hel1 Helsinki)"
   type        = string
-  default     = "nbg1"
+  default     = "fsn1"
 }
 
 variable "image" {

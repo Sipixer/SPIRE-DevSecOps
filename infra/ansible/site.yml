@@ -1,6 +1,6 @@
 ---
 - name: Configurer le serveur k3s
-  hosts: k3s
+  hosts: all
   become: true
   roles:
     - { role: k3s, tags: [k3s] }

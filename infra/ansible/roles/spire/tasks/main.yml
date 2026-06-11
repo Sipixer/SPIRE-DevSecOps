@@ -1,28 +1,41 @@
 ---
 - name: Repo Helm SPIFFE
-  kubernetes.core.helm_repository:
-    name: spiffe
-    repo_url: "{{ spire_helm_repo }}"
+  ansible.builtin.command: helm repo add spiffe {{ spire_helm_repo }} --force-update
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+
+- name: helm repo update
+  ansible.builtin.command: helm repo update spiffe
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
 
 - name: Namespace SPIRE
-  kubernetes.core.k8s:
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    state: present
-    definition:
+  ansible.builtin.command: >-
+    k3s kubectl create namespace {{ spire_namespace }}
+    --dry-run=client -o yaml
+  register: spire_ns
+  changed_when: false
+
+- name: Appliquer le namespace (label privileged)
+  ansible.builtin.shell:
+    cmd: |
+      k3s kubectl apply -f - <<'EOF'
       apiVersion: v1
       kind: Namespace
       metadata:
-        name: "{{ spire_namespace }}"
+        name: {{ spire_namespace }}
         labels:
           pod-security.kubernetes.io/enforce: privileged
+      EOF
+  changed_when: true
 
 - name: CRDs SPIRE
-  kubernetes.core.helm:
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    name: spire-crds
-    chart_ref: spiffe/spire-crds
-    chart_version: "{{ spire_crds_chart_version }}"
-    release_namespace: "{{ spire_namespace }}"
+  ansible.builtin.command: >-
+    helm upgrade --install spire-crds spiffe/spire-crds
+    --version {{ spire_crds_chart_version }}
+    --namespace {{ spire_namespace }}
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+  changed_when: true
 
 - name: Values SPIRE
   ansible.builtin.template:
@@ -31,12 +44,11 @@
     mode: "0644"
 
 - name: Chart SPIRE (Server + Agent)
-  kubernetes.core.helm:
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    name: spire
-    chart_ref: spiffe/spire
-    chart_version: "{{ spire_chart_version }}"
-    release_namespace: "{{ spire_namespace }}"
-    values_files: [/tmp/spire-values.yaml]
-    wait: true
-    timeout: 5m0s
+  ansible.builtin.command: >-
+    helm upgrade --install spire spiffe/spire
+    --version {{ spire_chart_version }}
+    --namespace {{ spire_namespace }}
+    --values /tmp/spire-values.yaml
+    --wait --timeout 5m
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+  changed_when: true

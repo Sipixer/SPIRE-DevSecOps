@@ -18,14 +18,18 @@ terraform apply
 ```
 
 Variables (`hcloud_token`, `ssh_public_key`) fournies par le workspace Terraform
-Cloud. En sortie : l'IP du serveur et `infra/ansible/inventory.ini`.
+Cloud. En sortie : `server_ip`.
 
 ## Configurer
 
+Inventaire inline depuis l'IP Terraform, clé SSH en argument :
+
 ```bash
-cd infra/ansible
+cd infra
 ansible-galaxy collection install kubernetes.core
-ansible-playbook site.yml
+ansible-playbook ansible/site.yml \
+  -i "$(terraform -chdir=terraform output -raw server_ip)," \
+  -u root --private-key ~/.ssh/spire-devsecops
 ```
 
 ## Détruire

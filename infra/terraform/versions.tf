@@ -16,10 +16,6 @@ terraform {
       source  = "hetznercloud/hcloud"
       version = "~> 1.49"
     }
-    local = {
-      source  = "hashicorp/local"
-      version = "~> 2.5"
-    }
   }
 }
 

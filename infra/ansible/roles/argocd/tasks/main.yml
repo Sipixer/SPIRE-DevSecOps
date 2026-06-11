@@ -1,39 +1,43 @@
 ---
 - name: Repo Helm Argo
-  kubernetes.core.helm_repository:
-    name: argo
-    repo_url: "{{ argocd_helm_repo }}"
+  ansible.builtin.command: helm repo add argo {{ argocd_helm_repo }} --force-update
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+
+- name: helm repo update
+  ansible.builtin.command: helm repo update argo
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
 
 - name: Installer ArgoCD
-  kubernetes.core.helm:
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    name: argocd
-    chart_ref: argo/argo-cd
-    chart_version: "{{ argocd_chart_version }}"
-    release_namespace: "{{ argocd_namespace }}"
-    create_namespace: true
-    wait: true
-    timeout: 5m0s
+  ansible.builtin.command: >-
+    helm upgrade --install argocd argo/argo-cd
+    --version {{ argocd_chart_version }}
+    --namespace {{ argocd_namespace }} --create-namespace
+    --wait --timeout 5m
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+  changed_when: true
 
 - name: Application ArgoCD (surveille k8s/ sur main)
-  kubernetes.core.k8s:
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    state: present
-    definition:
+  ansible.builtin.shell:
+    cmd: |
+      k3s kubectl apply -f - <<'EOF'
       apiVersion: argoproj.io/v1alpha1
       kind: Application
       metadata:
         name: shop
-        namespace: "{{ argocd_namespace }}"
+        namespace: {{ argocd_namespace }}
       spec:
         project: default
         source:
-          repoURL: "{{ gitops_repo_url }}"
-          targetRevision: "{{ gitops_repo_revision }}"
-          path: "{{ gitops_repo_path }}"
+          repoURL: {{ gitops_repo_url }}
+          targetRevision: {{ gitops_repo_revision }}
+          path: {{ gitops_repo_path }}
         destination:
           server: https://kubernetes.default.svc
-          namespace: "{{ shop_namespace }}"
+          namespace: {{ shop_namespace }}
         syncPolicy:
           automated: { prune: true, selfHeal: true }
           syncOptions: [CreateNamespace=true]
+      EOF
+  changed_when: true
