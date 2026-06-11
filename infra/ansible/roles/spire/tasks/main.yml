@@ -1,13 +1,10 @@
 ---
-# Déploie SPIRE (Server + Agent) via le chart Helm hardened.
-# Reprend la logique de l'ancien module Terraform, côté serveur.
-
-- name: Ajouter le repo Helm SPIFFE
+- name: Repo Helm SPIFFE
   kubernetes.core.helm_repository:
     name: spiffe
     repo_url: "{{ spire_helm_repo }}"
 
-- name: Créer le namespace SPIRE (privileged pour le CSI driver)
+- name: Namespace SPIRE
   kubernetes.core.k8s:
     kubeconfig: /etc/rancher/k3s/k3s.yaml
     state: present
@@ -19,7 +16,7 @@
         labels:
           pod-security.kubernetes.io/enforce: privileged
 
-- name: Installer les CRDs SPIRE
+- name: CRDs SPIRE
   kubernetes.core.helm:
     kubeconfig: /etc/rancher/k3s/k3s.yaml
     name: spire-crds
@@ -27,20 +24,19 @@
     chart_version: "{{ spire_crds_chart_version }}"
     release_namespace: "{{ spire_namespace }}"
 
-- name: Rendre les values SPIRE
+- name: Values SPIRE
   ansible.builtin.template:
     src: spire-values.yaml.j2
     dest: /tmp/spire-values.yaml
     mode: "0644"
 
-- name: Installer le chart SPIRE (Server + Agent)
+- name: Chart SPIRE (Server + Agent)
   kubernetes.core.helm:
     kubeconfig: /etc/rancher/k3s/k3s.yaml
     name: spire
     chart_ref: spiffe/spire
     chart_version: "{{ spire_chart_version }}"
     release_namespace: "{{ spire_namespace }}"
-    values_files:
-      - /tmp/spire-values.yaml
+    values_files: [/tmp/spire-values.yaml]
     wait: true
     timeout: 5m0s

@@ -1,8 +1,5 @@
 ---
-# Installe ArgoCD et déclare l'Application qui réconcilie les manifests du repo.
-# Modèle pull : ArgoCD tire depuis Git, rien n'entre dans le cluster de l'extérieur.
-
-- name: Ajouter le repo Helm Argo
+- name: Repo Helm Argo
   kubernetes.core.helm_repository:
     name: argo
     repo_url: "{{ argocd_helm_repo }}"
@@ -18,7 +15,7 @@
     wait: true
     timeout: 5m0s
 
-- name: Déclarer l'Application ArgoCD (surveille le dossier k8s/ du repo)
+- name: Application ArgoCD (surveille k8s/ sur main)
   kubernetes.core.k8s:
     kubeconfig: /etc/rancher/k3s/k3s.yaml
     state: present
@@ -38,22 +35,5 @@
           server: https://kubernetes.default.svc
           namespace: "{{ shop_namespace }}"
         syncPolicy:
-          automated:
-            prune: true
-            selfHeal: true
-          syncOptions:
-            - CreateNamespace=true
-
-- name: Récupérer le mot de passe admin initial d'ArgoCD
-  ansible.builtin.shell:
-    cmd: >
-      k3s kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret
-      -o jsonpath='{.data.password}' | base64 -d
-  register: argocd_admin_password
-  changed_when: false
-
-- name: Afficher l'accès ArgoCD
-  ansible.builtin.debug:
-    msg: >
-      ArgoCD installé. Utilisateur: admin / Mot de passe: {{ argocd_admin_password.stdout }}.
-      Port-forward : kubectl -n {{ argocd_namespace }} port-forward svc/argocd-server 8080:443
+          automated: { prune: true, selfHeal: true }
+          syncOptions: [CreateNamespace=true]

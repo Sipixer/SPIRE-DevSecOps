@@ -1,27 +1,18 @@
 output "server_ip" {
-  description = "IP publique du serveur (cible d'Ansible)"
+  description = "IP publique du serveur"
   value       = hcloud_server.main.ipv4_address
 }
 
-output "server_status" {
-  description = "État du serveur"
-  value       = hcloud_server.main.status
-}
-
 output "ssh_command" {
-  description = "Commande pour se connecter au serveur"
-  value       = "ssh root@${hcloud_server.main.ipv4_address}"
+  value = "ssh -i ~/.ssh/spire-devsecops root@${hcloud_server.main.ipv4_address}"
 }
 
-# Inventaire Ansible prêt à l'emploi, écrit à la racine d'infra/ansible.
+# Inventaire Ansible généré pour la cible.
 resource "local_file" "ansible_inventory" {
-  filename = "${path.module}/../ansible/inventory.ini"
-  content  = <<-EOT
+  filename        = "${path.module}/../ansible/inventory.ini"
+  file_permission = "0644"
+  content         = <<-EOT
     [k3s]
     ${hcloud_server.main.ipv4_address}
-
-    [k3s:vars]
-    ansible_user=root
-    ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new'
   EOT
 }
