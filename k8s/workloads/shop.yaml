@@ -48,6 +48,7 @@ spec:
           ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
           env:
             - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
+            - { name: AUTHZ_DISABLED, value: "true" }
           volumeMounts:
             - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
       volumes:
@@ -83,6 +84,7 @@ spec:
           ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
           env:
             - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
+            - { name: AUTHZ_DISABLED, value: "true" }
           volumeMounts:
             - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
       volumes:
@@ -117,6 +119,7 @@ spec:
           ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
           env:
             - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
+            - { name: AUTHZ_DISABLED, value: "true" }
             - { name: PAYMENTS_URL, value: https://payments.shop.svc.cluster.local:8443/pay }
           volumeMounts:
             - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
@@ -152,6 +155,7 @@ spec:
           ports: [{ containerPort: 8080 }, { containerPort: 9100 }]
           env:
             - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
+            - { name: AUTHZ_DISABLED, value: "true" }
             - { name: ORDERS_URL, value: https://orders.shop.svc.cluster.local:8443 }
             - { name: CATALOG_URL, value: https://catalog.shop.svc.cluster.local:8443 }
           volumeMounts:
