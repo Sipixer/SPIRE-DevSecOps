@@ -1,0 +1,62 @@
+# Provisionne et configure la plateforme : Terraform (serveur Hetzner) puis
+# Ansible (k3s, SPIRE, ArgoCD, observabilité). Déclenché à la main — créer ou
+# détruire un serveur n'est pas lié à un push de code.
+name: infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "apply (créer + configurer) ou destroy"
+        type: choice
+        options: [apply, destroy]
+        default: apply
+
+permissions:
+  contents: read
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    env:
+      TF_CLOUD_ORGANIZATION: Sipixer
+      TF_WORKSPACE: spire-devsecops
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_wrapper: false
+
+      - name: Terraform ${{ inputs.action }}
+        working-directory: infra/terraform
+        env:
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: |
+          terraform init -input=false
+          terraform ${{ inputs.action }} -auto-approve -input=false
+
+      - name: Récupérer l'IP du serveur
+        if: inputs.action == 'apply'
+        id: tf
+        working-directory: infra/terraform
+        run: echo "ip=$(terraform output -raw server_ip)" >> "$GITHUB_OUTPUT"
+
+      - name: Clé SSH
+        if: inputs.action == 'apply'
+        run: |
+          install -m 600 /dev/null key
+          printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" > key
+
+      - name: Ansible (k3s + SPIRE + ArgoCD + observabilité)
+        if: inputs.action == 'apply'
+        working-directory: infra
+        run: |
+          pip install ansible
+          ansible-galaxy collection install kubernetes.core
+          ansible-playbook ansible/site.yml \
+            -i "${{ steps.tf.outputs.ip }}," \
+            -u root --private-key ../key \
+            -e ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new'
