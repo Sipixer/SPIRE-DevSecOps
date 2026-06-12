@@ -29,11 +29,11 @@ jobs:
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
           terraform_wrapper: false
 
+      # Exécution Remote (Terraform Cloud) : hcloud_token et ssh_public_key sont
+      # des variables du workspace, jamais exposées à GitHub. Seul TF_API_TOKEN
+      # est nécessaire pour s'authentifier à Terraform Cloud.
       - name: Terraform ${{ inputs.action }}
         working-directory: infra/terraform
-        env:
-          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
-          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
         run: |
           terraform init -input=false
           terraform ${{ inputs.action }} -auto-approve -input=false

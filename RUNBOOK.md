@@ -17,8 +17,10 @@ Ansible installe k3s, SPIRE, ArgoCD (qui surveille `deploy/prod`) et
 l'observabilité. ArgoCD déploie ensuite les services depuis GHCR.
 
 Alternative : workflow GitHub `infra` (Actions → infra → Run), action `apply`.
-Requiert les secrets `TF_API_TOKEN`, `HCLOUD_TOKEN`, `SSH_PUBLIC_KEY`,
-`SSH_PRIVATE_KEY`.
+Le workspace Terraform Cloud doit être en mode d'exécution **Remote** : les
+variables `hcloud_token` et `ssh_public_key` y sont stockées, donc GitHub n'a
+besoin que des secrets `TF_API_TOKEN` (auth Terraform Cloud) et
+`SSH_PRIVATE_KEY` (pour qu'Ansible se connecte au serveur).
 
 ## Démo
 
