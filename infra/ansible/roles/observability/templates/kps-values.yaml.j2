@@ -91,6 +91,10 @@ prometheus:
 grafana:
   adminUser: "{{ grafana_admin_user }}"
   adminPassword: "{{ grafana_admin_password }}"
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 300m, memory: 256Mi }
