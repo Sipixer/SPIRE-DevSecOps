@@ -123,8 +123,8 @@
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "targets": [
         {
-          "expr": "sum(rate(spire_server_svid_signed_total[5m])) or sum(rate(spire_agent_manager_svid_rotate[5m]))",
-          "legendFormat": "SVID signés/rotés",
+          "expr": "sum(rate(spire_agent_rpc_workload_api_fetch_x509svid[5m]))",
+          "legendFormat": "SVID distribués/s",
           "refId": "A"
         }
       ]
