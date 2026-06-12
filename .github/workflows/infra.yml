@@ -14,7 +14,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # OIDC : GitHub émet un token éphémère pour Terraform Cloud
 
 jobs:
   infra:
@@ -22,14 +21,12 @@ jobs:
     env:
       TF_CLOUD_ORGANIZATION: Sipixer
       TF_WORKSPACE: spire-devsecops
-      # Déclenche l'auth OIDC : setup-terraform échange le token GitHub contre
-      # un accès Terraform Cloud temporaire. Aucun secret stocké.
-      TFC_WORKLOAD_IDENTITY_AUDIENCE: app.terraform.io
     steps:
       - uses: actions/checkout@v4
 
       - uses: hashicorp/setup-terraform@v3
         with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
           terraform_wrapper: false
 
       # Exécution Remote (Terraform Cloud) : hcloud_token et ssh_public_key sont
