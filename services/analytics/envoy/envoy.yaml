@@ -1,20 +1,9 @@
-# Envoy sidecar d'Analytics.
+# Envoy sidecar d'Analytics : termine le mTLS SPIFFE à la place de l'app Node.js.
 #
-# Rôle : terminer le mTLS SPIFFE à la place de l'app Node.js.
-#   - récupère son SVID et le bundle du trust domain via SDS, auprès du
-#     SPIRE Agent (socket Workload API monté par le CSI driver) ;
-#   - n'accepte que les pairs du trust domain example.org ;
-#   - transmet l'identité vérifiée du client à l'app via le XFCC standard ;
-#   - route le trafic en clair vers 127.0.0.1:9090 (l'app, localhost only).
-#
-# Le SPIRE Agent expose un serveur SDS sur son socket. Envoy y récupère son
-# SVID via le nom de secret par défaut "default" (default_svid_name) et le
-# bundle du trust domain via "ROOTCA" (default_bundle_name), tous deux
-# renouvelés automatiquement. On ne demande PAS le SVID par son SPIFFE ID
-# littéral : SPIRE n'autorise alors la requête que si le nom correspond
-# exactement à une identité retournée au workload, ce qui échoue avec
-# "workload is not authorized for the requested identities". Les noms par
-# défaut sont servis sans cette contrainte.
+# Récupère son SVID et le bundle du trust domain via SDS auprès du SPIRE Agent
+# sous les noms de secret par défaut "default" et "ROOTCA". On ne demande PAS le
+# SVID par son SPIFFE ID littéral : SPIRE renverrait alors "workload is not
+# authorized for the requested identities". Les noms par défaut évitent ça.
 node:
   id: analytics
   cluster: shop
@@ -34,9 +23,7 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: analytics
-                # Transmet l'identité du pair (URI SAN du cert client) à l'app
-                # via x-forwarded-client-cert. L'app lit ce header, contrôlé
-                # par Envoy et donc non falsifiable depuis l'extérieur.
+                # Transmet l'URI SAN du pair à l'app via XFCC (non falsifiable).
                 forward_client_cert_details: SANITIZE_SET
                 set_current_client_cert_details:
                   uri: true
@@ -56,11 +43,8 @@ static_resources:
             name: envoy.transport_sockets.tls
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
-              # mTLS obligatoire : le client doit présenter un certificat valide.
               require_client_certificate: true
               common_tls_context:
-                # Notre SVID, servi par le SPIRE Agent via SDS sous le nom de
-                # secret par défaut "default" (default_svid_name de l'agent).
                 tls_certificate_sds_secret_configs:
                   - name: "default"
                     sds_config:
@@ -70,10 +54,6 @@ static_resources:
                         transport_api_version: V3
                         grpc_services:
                           - envoy_grpc: { cluster_name: spire_agent }
-                # Validation du pair via le bundle du trust domain (SDS),
-                # servi sous le nom de secret par défaut "ROOTCA"
-                # (default_bundle_name de l'agent), restreinte aux SVID du
-                # trust domain example.org.
                 combined_validation_context:
                   default_validation_context:
                     match_typed_subject_alt_names:
@@ -91,7 +71,6 @@ static_resources:
                           - envoy_grpc: { cluster_name: spire_agent }
 
   clusters:
-    # Cluster gRPC vers le SPIRE Agent (socket Workload API / SDS).
     - name: spire_agent
       type: STATIC
       typed_extension_protocol_options:
@@ -108,7 +87,6 @@ static_resources:
                     pipe:
                       path: /run/spire/sockets/spire-agent.sock
 
-    # L'app Node.js locale, en clair.
     - name: analytics_app
       type: STATIC
       load_assignment:

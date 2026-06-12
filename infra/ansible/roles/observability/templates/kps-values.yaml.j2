@@ -1,8 +1,5 @@
-# Valeurs kube-prometheus-stack, rendues par Ansible.
-# Stack allégée pour un petit VPS (cpx32 4 vCPU / 8 Go) : alertmanager off,
-# rétention courte, ressources réduites, composants non essentiels désactivés.
-
-# --- Composants désactivés (économie mémoire) ---
+# Stack allégée pour un petit VPS : alertmanager off, rétention courte,
+# composants control-plane k3s coupés (souvent non exposés -> targets DOWN).
 alertmanager:
   enabled: false
 
@@ -15,8 +12,6 @@ prometheusOperator:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { cpu: 200m, memory: 256Mi }
 
-# Probes/composants du control-plane k3s souvent non exposés : on les coupe
-# pour éviter des targets DOWN bruyantes.
 kubeControllerManager:
   enabled: false
 kubeScheduler:
@@ -26,7 +21,6 @@ kubeEtcd:
 kubeProxy:
   enabled: false
 
-# --- Prometheus allégé ---
 prometheus:
   prometheusSpec:
     retention: 2d
@@ -36,15 +30,10 @@ prometheus:
     resources:
       requests: { cpu: 100m, memory: 384Mi }
       limits: { cpu: 500m, memory: 768Mi }
-    # On veut scraper TOUS les ServiceMonitors/PodMonitors, pas seulement
-    # ceux portant le label de la release.
+    # Scrape tous les Service/PodMonitors, pas seulement ceux de la release.
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
-    # Stockage éphémère (emptyDir) : pas de PVC, suffisant pour la démo.
     storageSpec: {}
-    # Scrape des services métier du namespace shop sur leur port /metrics HTTP
-    # dédié ({{ metrics_port }}, en clair). Les ports applicatifs (8443) sont en
-    # mTLS et ne sont pas scrapés directement.
     additionalScrapeConfigs:
       - job_name: shop-services
         kubernetes_sd_configs:
@@ -52,7 +41,6 @@ prometheus:
             namespaces:
               names: [{{ shop_namespace }}]
         relabel_configs:
-          # Ne garde que les endpoints du port nommé "metrics".
           - source_labels: [__meta_kubernetes_endpoint_port_name]
             action: keep
             regex: metrics
@@ -62,7 +50,23 @@ prometheus:
             target_label: namespace
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
-      # Fallback générique : tout pod annoté prometheus.io/scrape=true.
+      # Le chart spiffe/spire expose la télémétrie sur un containerPort "prom"
+      # (9988) mais n'ouvre aucun Service : on scrape les pods directement.
+      - job_name: spire-telemetry
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [{{ spire_namespace }}]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: prom
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            target_label: service
       - job_name: annotated-pods
         kubernetes_sd_configs:
           - role: pod
@@ -84,7 +88,6 @@ prometheus:
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
 
-# --- Grafana ---
 grafana:
   adminUser: "{{ grafana_admin_user }}"
   adminPassword: "{{ grafana_admin_password }}"
@@ -93,7 +96,6 @@ grafana:
     limits: { cpu: 300m, memory: 256Mi }
   persistence:
     enabled: false
-  # Exposé via l'ingress Traefik de k3s sur un Host dédié.
   ingress:
     enabled: true
     ingressClassName: traefik
@@ -101,7 +103,6 @@ grafana:
       - "{{ grafana_host }}"
     path: /
     pathType: Prefix
-  # Charge les dashboards déclarés via ConfigMap (label grafana_dashboard=1).
   sidecar:
     dashboards:
       enabled: true

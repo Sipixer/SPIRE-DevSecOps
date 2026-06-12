@@ -1,6 +1,5 @@
-// Analytics : service applicatif Node.js placé derrière Envoy.
-// Envoy porte le mTLS SPIFFE, vérifie l'identité du pair et la transmet ici
-// via un header. L'app écoute en clair sur localhost : seule Envoy l'atteint.
+// Analytics : app Node.js derrière Envoy, qui porte le mTLS et transmet
+// l'identité du pair via header. L'app écoute en clair : seule Envoy l'atteint.
 "use strict";
 
 const http = require("http");
@@ -12,9 +11,7 @@ const METRICS_PORT = 9100;
 let eventsTotal = 0;
 const eventsByCaller = new Map();
 
-// Extrait le SPIFFE ID de l'appelant transmis par Envoy. Envoy peut poser un
-// header dédié (x-spiffe-id) ou le XFCC standard (x-forwarded-client-cert),
-// qui contient un champ URI=spiffe://... pour le certificat client.
+// Envoy pose soit x-spiffe-id, soit le XFCC standard (champ URI=spiffe://...).
 function callerFromHeaders(headers) {
   const direct = headers["x-spiffe-id"];
   if (direct) return direct;
@@ -67,8 +64,7 @@ server.listen(PORT, HOST, () => {
   console.log(`analytics: écoute sur http://${HOST}:${PORT} (derrière Envoy)`);
 });
 
-// Endpoint /metrics exposé au cluster (HTTP clair, comme les services Go) pour
-// que Prometheus le scrape. Pas de donnée sensible, jamais exposé hors cluster.
+// Second serveur /metrics exposé au cluster en clair (scrape Prometheus).
 http
   .createServer((req, res) => {
     if (req.method === "GET" && req.url === "/metrics") {

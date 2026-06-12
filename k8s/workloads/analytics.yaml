@@ -1,18 +1,11 @@
-# Analytics : service applicatif Node.js placé derrière un sidecar Envoy.
-#
-# Contrairement aux services Go, l'app ne manipule pas SPIFFE : c'est Envoy qui
-# porte le mTLS. Le pod a deux conteneurs partageant la loopback :
-#   - envoy     : écoute en mTLS sur :8443, récupère son SVID via SDS auprès du
-#                 SPIRE Agent, vérifie le pair, route vers 127.0.0.1:9090 ;
-#   - analytics : l'app Node.js, écoute sur 127.0.0.1:9090 (localhost only).
-#
-# Le ServiceAccount "analytics" détermine l'identité SPIFFE attribuée par SPIRE :
-# spiffe://example.org/ns/shop/sa/analytics. Envoy s'en sert via SDS.
+# Analytics : app Node.js derrière un sidecar Envoy qui porte le mTLS SPIFFE.
+# Le pod a deux conteneurs partageant la loopback : envoy (mTLS :8443 -> SDS
+# -> 127.0.0.1:9090) et analytics (l'app, localhost only). L'identité SPIFFE
+# vient du ServiceAccount : spiffe://example.org/ns/shop/sa/analytics.
 apiVersion: v1
 kind: ServiceAccount
 metadata: { name: analytics, namespace: shop }
 ---
-# Config Envoy montée dans le sidecar.
 apiVersion: v1
 kind: ConfigMap
 metadata: { name: analytics-envoy, namespace: shop }
@@ -117,7 +110,6 @@ spec:
     spec:
       serviceAccountName: analytics
       containers:
-        # Sidecar Envoy : porte le mTLS SPIFFE et expose :8443.
         - name: envoy
           image: envoyproxy/envoy:v1.31-latest
           args: ["-c", "/etc/envoy/envoy.yaml"]
@@ -128,8 +120,6 @@ spec:
           volumeMounts:
             - { name: envoy-config, mountPath: /etc/envoy, readOnly: true }
             - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
-        # App Node.js : /event sur 127.0.0.1:9090 (atteint seulement par Envoy),
-        # /metrics sur :9100 (scrapé par Prometheus, comme les services Go).
         - name: analytics
           image: ghcr.io/sipixer/spire-devsecops/analytics:latest
           imagePullPolicy: Always
@@ -140,7 +130,6 @@ spec:
       volumes:
         - name: envoy-config
           configMap: { name: analytics-envoy }
-        # Le SPIFFE CSI driver monte le socket du Workload API en lecture seule.
         - name: spire-agent-socket
           csi: { driver: csi.spiffe.io, readOnly: true }
 ---

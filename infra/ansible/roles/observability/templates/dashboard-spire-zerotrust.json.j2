@@ -128,6 +128,30 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "Analytics",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Analytics — événements (via Envoy)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 27 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(analytics_events_total[5m]))",
+          "legendFormat": "événements/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (caller) (rate(analytics_events_by_caller_total[5m]))",
+          "legendFormat": "{{ '{{caller}}' }}",
+          "refId": "B"
+        }
+      ]
     }
   ]
 }
