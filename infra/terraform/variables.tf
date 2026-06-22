@@ -57,6 +57,18 @@ variable "argocd_hostname" {
   default     = "argocd.sylvainrougie.fr"
 }
 
+variable "grafana_hostname" {
+  description = "Sous-domaine exposant Grafana via le tunnel (protégé par Access)"
+  type        = string
+  default     = "grafana.sylvainrougie.fr"
+}
+
+variable "shop_hostname" {
+  description = "Sous-domaine exposant la boutique de démo (Gateway) via le tunnel, public (sans Access)"
+  type        = string
+  default     = "shop.sylvainrougie.fr"
+}
+
 variable "access_allowed_email" {
   description = "Email autorisé à passer Cloudflare Access pour atteindre ArgoCD"
   type        = string

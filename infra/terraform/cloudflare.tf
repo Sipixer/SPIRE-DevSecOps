@@ -1,38 +1,43 @@
-# Accès à l'UI ArgoCD via Cloudflare Tunnel + Access (zero-trust).
+# Accès aux UI via un seul Cloudflare Tunnel (zero-trust, aucun port entrant).
 #
-# Principe : aucun port entrant n'est ouvert sur le serveur. Un pod cloudflared
-# (déployé en GitOps par ArgoCD) établit une connexion SORTANTE vers Cloudflare.
-# Cloudflare Access met une page de login (one-time PIN par email) DEVANT ArgoCD :
-# seul access_allowed_email peut atteindre l'UI, tout le reste est refusé.
+# Un pod cloudflared (connexion SORTANTE) route 3 hostnames vers 3 services
+# internes du cluster. Cloudflare Access met un login DEVANT les services
+# sensibles (ArgoCD, Grafana) ; la boutique de démo (Gateway) reste publique.
 #
-#   Navigateur ─▶ https://argocd.sylvainrougie.fr
-#                  └─ Cloudflare Access (login email) ─▶ tunnel ─▶ argocd-server (ClusterIP)
+#   argocd.sylvainrougie.fr  → Access(login) → argocd-server   (admin cluster)
+#   grafana.sylvainrougie.fr → Access(login) → grafana          (observabilité)
+#   shop.sylvainrougie.fr    → (public)       → gateway          (démo boutique)
 
-# --- Le tunnel (remote-managed : la config d'ingress vit côté Cloudflare) ---
-resource "cloudflare_zero_trust_tunnel_cloudflared" "argocd" {
+# --- Le tunnel (remote-managed) ---
+resource "cloudflare_zero_trust_tunnel_cloudflared" "main" {
   account_id = var.cloudflare_account_id
   name       = "spire-argocd"
   config_src = "cloudflare"
 }
 
-# Token utilisé par le pod cloudflared pour se connecter (injecté en Secret k8s).
-data "cloudflare_zero_trust_tunnel_cloudflared_token" "argocd" {
+data "cloudflare_zero_trust_tunnel_cloudflared_token" "main" {
   account_id = var.cloudflare_account_id
-  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.argocd.id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.main.id
 }
 
-# Routage : le hostname public -> le service ArgoCD interne au cluster.
-# argocd-server écoute en HTTPS avec un cert auto-signé, d'où le no-TLS-verify.
-resource "cloudflare_zero_trust_tunnel_cloudflared_config" "argocd" {
+# Routage : chaque hostname public -> un service interne (HTTP, TLS terminé par
+# Cloudflare). argocd-server et grafana tournent en mode insecure derrière le tunnel.
+resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
   account_id = var.cloudflare_account_id
-  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.argocd.id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.main.id
   config = {
     ingress = [
       {
-        # argocd-server tourne en --insecure (TLS terminé par Cloudflare en
-        # amont), donc on l'atteint en HTTP interne. Pas de boucle de redirection.
         hostname = var.argocd_hostname
         service  = "http://argocd-server.argocd.svc.cluster.local:80"
+      },
+      {
+        hostname = var.grafana_hostname
+        service  = "http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80"
+      },
+      {
+        hostname = var.shop_hostname
+        service  = "http://gateway.shop.svc.cluster.local:8080"
       },
       {
         service = "http_status:404"
@@ -41,14 +46,9 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "argocd" {
   }
 }
 
-# --- DNS : CNAME proxifié vers le tunnel ---
-resource "cloudflare_dns_record" "argocd" {
-  zone_id = data.cloudflare_zone.main.zone_id
-  name    = var.argocd_hostname
-  content = "${cloudflare_zero_trust_tunnel_cloudflared.argocd.id}.cfargotunnel.com"
-  type    = "CNAME"
-  ttl     = 1
-  proxied = true
+# --- DNS : un CNAME proxifié par hostname, tous vers le tunnel ---
+locals {
+  tunnel_cname = "${cloudflare_zero_trust_tunnel_cloudflared.main.id}.cfargotunnel.com"
 }
 
 data "cloudflare_zone" "main" {
@@ -57,7 +57,35 @@ data "cloudflare_zone" "main" {
   }
 }
 
-# --- Cloudflare Access : login obligatoire devant ArgoCD ---
+resource "cloudflare_dns_record" "argocd" {
+  zone_id = data.cloudflare_zone.main.zone_id
+  name    = var.argocd_hostname
+  content = local.tunnel_cname
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
+resource "cloudflare_dns_record" "grafana" {
+  zone_id = data.cloudflare_zone.main.zone_id
+  name    = var.grafana_hostname
+  content = local.tunnel_cname
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
+resource "cloudflare_dns_record" "shop" {
+  zone_id = data.cloudflare_zone.main.zone_id
+  name    = var.shop_hostname
+  content = local.tunnel_cname
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
+# --- Cloudflare Access : login obligatoire devant ArgoCD et Grafana ---
+# La boutique (shop) n'a PAS d'application Access => publique.
 resource "cloudflare_zero_trust_access_application" "argocd" {
   account_id       = var.cloudflare_account_id
   name             = "ArgoCD (SPIRE DevSecOps)"
@@ -65,13 +93,25 @@ resource "cloudflare_zero_trust_access_application" "argocd" {
   type             = "self_hosted"
   session_duration = "24h"
   policies = [{
-    id         = cloudflare_zero_trust_access_policy.argocd.id
+    id         = cloudflare_zero_trust_access_policy.allow_admin.id
     precedence = 1
   }]
 }
 
-# Policy deny-by-default : seul l'email autorisé passe (code OTP par email).
-resource "cloudflare_zero_trust_access_policy" "argocd" {
+resource "cloudflare_zero_trust_access_application" "grafana" {
+  account_id       = var.cloudflare_account_id
+  name             = "Grafana (SPIRE DevSecOps)"
+  domain           = var.grafana_hostname
+  type             = "self_hosted"
+  session_duration = "24h"
+  policies = [{
+    id         = cloudflare_zero_trust_access_policy.allow_admin.id
+    precedence = 1
+  }]
+}
+
+# Policy partagée : seul l'email autorisé passe (code OTP par email), deny par défaut.
+resource "cloudflare_zero_trust_access_policy" "allow_admin" {
   account_id       = var.cloudflare_account_id
   name             = "Autoriser l'admin"
   decision         = "allow"
@@ -83,13 +123,20 @@ resource "cloudflare_zero_trust_access_policy" "argocd" {
   }]
 }
 
-# --- Sorties utiles ---
+# --- Sorties ---
 output "argocd_url" {
   value = "https://${var.argocd_hostname}"
 }
 
-# Token du tunnel : sert au Secret k8s du pod cloudflared. Sensible.
+output "grafana_url" {
+  value = "https://${var.grafana_hostname}"
+}
+
+output "shop_url" {
+  value = "https://${var.shop_hostname}"
+}
+
 output "cloudflared_tunnel_token" {
-  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.argocd.token
+  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.main.token
   sensitive = true
 }

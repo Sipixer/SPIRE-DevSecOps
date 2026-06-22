@@ -21,18 +21,11 @@ resource "hcloud_firewall" "main" {
       source_ips = [rule.value]
     }
   }
-  rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "80"
-    source_ips = ["0.0.0.0/0", "::/0"]
-  }
-  rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "443"
-    source_ips = ["0.0.0.0/0", "::/0"]
-  }
+
+  # Zero-trust total : AUCUN port web entrant. Tout le trafic HTTP (ArgoCD,
+  # Grafana, boutique) passe par le tunnel Cloudflare, qui établit une connexion
+  # SORTANTE — donc rien à ouvrir en entrée. Au repos, ce firewall ne laisse
+  # passer que SSH juste-à-temps (et seulement pendant un provisioning).
 }
 
 resource "hcloud_server" "main" {

@@ -100,13 +100,10 @@ grafana:
     limits: { cpu: 300m, memory: 256Mi }
   persistence:
     enabled: false
+  # Pas d'ingress Traefik : Grafana est exposé via le tunnel Cloudflare
+  # (grafana.sylvainrougie.fr, protégé par Access). Aucun port entrant.
   ingress:
-    enabled: true
-    ingressClassName: traefik
-    hosts:
-      - "{{ grafana_host }}"
-    path: /
-    pathType: Prefix
+    enabled: false
   sidecar:
     dashboards:
       enabled: true
