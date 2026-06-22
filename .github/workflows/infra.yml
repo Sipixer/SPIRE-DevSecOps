@@ -73,9 +73,17 @@ jobs:
 
       - name: Clé SSH
         if: inputs.action == 'apply'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           install -m 600 /dev/null key
-          printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" > key
+          # Le format OpenSSH exige un saut de ligne final : on l'écrit via
+          # l'env (préserve les retours) et on garantit le \n terminal, sinon
+          # OpenSSH rejette la clé avec "error in libcrypto".
+          printf '%s\n' "$SSH_PRIVATE_KEY" > key
+          chmod 600 key
+          ssh-keygen -y -f key >/dev/null && echo "Clé SSH valide" || {
+            echo "::error::Clé SSH invalide — vérifier le secret SSH_PRIVATE_KEY"; exit 1; }
 
       - name: Ansible (k3s + SPIRE + ArgoCD + observabilité)
         if: inputs.action == 'apply'
