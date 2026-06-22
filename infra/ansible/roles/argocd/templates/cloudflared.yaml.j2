@@ -1,7 +1,7 @@
 # Connecteur Cloudflare Tunnel : établit une connexion SORTANTE vers Cloudflare
-# et expose argocd-server (ClusterIP) sur https://{{ argocd_hostname }} sans
-# ouvrir aucun port entrant. Le token du tunnel vient du Secret cloudflared-token
-# (créé par Ansible à partir de l'output Terraform — jamais committé dans Git).
+# et expose argocd-server (ClusterIP) sans ouvrir aucun port entrant. Le hostname
+# et le routage sont gérés côté Cloudflare (Terraform). Le token du tunnel vient
+# du Secret cloudflared-token (créé par Ansible depuis l'output Terraform).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
