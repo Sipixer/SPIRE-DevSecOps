@@ -1,6 +1,12 @@
 # Provisionne et configure la plateforme : Terraform (serveur Hetzner) puis
 # Ansible (k3s, SPIRE, ArgoCD, observabilité). Déclenché à la main — créer ou
 # détruire un serveur n'est pas lié à un push de code.
+#
+# Accès SSH JUSTE-À-TEMPS (zero-trust) : le port 22 est FERMÉ par défaut sur le
+# firewall Hetzner. Pour configurer le serveur, ce workflow l'ouvre uniquement
+# pour l'IP du runner GitHub (<ip>/32), lance Ansible, puis le REFERME — y
+# compris si Ansible échoue (step `if: always()`). SSH n'est jamais exposé en
+# permanence.
 name: infra
 
 on:
@@ -29,20 +35,41 @@ jobs:
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
           terraform_wrapper: false
 
+      - name: Terraform init
+        working-directory: infra/terraform
+        run: terraform init -input=false
+
+      # destroy : on détruit tout, rien d'autre à faire.
+      - name: Terraform destroy
+        if: inputs.action == 'destroy'
+        working-directory: infra/terraform
+        run: terraform destroy -auto-approve -input=false
+
+      # --- apply : provisionne le serveur, port 22 FERMÉ (allowed_ssh_cidr="") ---
       # Exécution Remote (Terraform Cloud) : hcloud_token et ssh_public_key sont
       # des variables du workspace, jamais exposées à GitHub. Seul TF_API_TOKEN
       # est nécessaire pour s'authentifier à Terraform Cloud.
-      - name: Terraform ${{ inputs.action }}
+      - name: Terraform apply (serveur, SSH fermé)
+        if: inputs.action == 'apply'
         working-directory: infra/terraform
-        run: |
-          terraform init -input=false
-          terraform ${{ inputs.action }} -auto-approve -input=false
+        run: terraform apply -auto-approve -input=false
 
       - name: Récupérer l'IP du serveur
         if: inputs.action == 'apply'
         id: tf
         working-directory: infra/terraform
         run: echo "ip=$(terraform output -raw server_ip)" >> "$GITHUB_OUTPUT"
+
+      # JIT : ouvre le port 22 pour la seule IP de CE runner, le temps d'Ansible.
+      - name: Ouvrir SSH pour l'IP du runner (JIT)
+        if: inputs.action == 'apply'
+        id: jit
+        working-directory: infra/terraform
+        run: |
+          RUNNER_IP=$(curl -fsS https://api.ipify.org)
+          echo "Runner IP: ${RUNNER_IP} — ouverture du port 22 pour ${RUNNER_IP}/32"
+          terraform apply -auto-approve -input=false \
+            -var "allowed_ssh_cidr=${RUNNER_IP}/32"
 
       - name: Clé SSH
         if: inputs.action == 'apply'
@@ -57,7 +84,17 @@ jobs:
           ANSIBLE_HOST_KEY_CHECKING: "false"
         run: |
           pip install ansible
-          ansible-galaxy collection install kubernetes.core
+          ansible-galaxy collection install -r ansible/requirements.yml
           ansible-playbook ansible/site.yml \
             -i "${{ steps.tf.outputs.ip }}," \
             -u root --private-key ../key
+
+      # JIT : referme le port 22 quoi qu'il arrive (même si Ansible a échoué).
+      # C'est ce `always()` qui garantit qu'on ne laisse jamais SSH ouvert.
+      - name: Refermer SSH (JIT)
+        if: ${{ always() && inputs.action == 'apply' && steps.jit.outcome == 'success' }}
+        working-directory: infra/terraform
+        run: |
+          echo "Fermeture du port 22 (retour à l'état au repos)"
+          terraform apply -auto-approve -input=false \
+            -var "allowed_ssh_cidr="

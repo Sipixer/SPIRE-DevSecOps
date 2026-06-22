@@ -2,7 +2,41 @@
 - name: Configurer le serveur k3s
   hosts: all
   become: true
+  pre_tasks:
+    # Défense en profondeur, en complément des baselines dev-sec :
+    #   - fail2ban : bannit les IP qui tentent du brute-force SSH (filet de
+    #     sécurité si jamais le port 22 est ouvert, ceinture + bretelles) ;
+    #   - unattended-upgrades : patchs de sécurité OS appliqués automatiquement
+    #     (la plupart des compromissions exploitent des CVE déjà corrigées).
+    - name: Installer fail2ban et unattended-upgrades
+      ansible.builtin.apt:
+        name: [fail2ban, unattended-upgrades]
+        state: present
+        update_cache: true
+      tags: [hardening]
+
+    - name: Activer fail2ban
+      ansible.builtin.service:
+        name: fail2ban
+        enabled: true
+        state: started
+      tags: [hardening]
+
+    - name: Activer les mises à jour de sécurité automatiques
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+      tags: [hardening]
   roles:
+    # Durcissement en premier : on sécurise le socle (sshd + OS) avant d'installer
+    # quoi que ce soit. Baselines dev-sec, surchargées dans group_vars/all.yml.
+    - { role: devsec.hardening.os_hardening, tags: [hardening] }
+    - { role: devsec.hardening.ssh_hardening, tags: [hardening] }
     - { role: k3s, tags: [k3s] }
     - { role: spire, tags: [spire] }
     - { role: argocd, tags: [argocd] }

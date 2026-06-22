@@ -8,11 +8,18 @@ resource "hcloud_ssh_key" "main" {
 resource "hcloud_firewall" "main" {
   name = "${var.server_name}-fw"
 
-  rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "22"
-    source_ips = [var.allowed_ssh_cidr]
+  # Règle SSH JUSTE-À-TEMPS : présente uniquement quand allowed_ssh_cidr est
+  # renseigné (la CI y met l'IP du runner le temps d'Ansible). Au repos la
+  # variable vaut "" → aucune règle 22 → port fermé. C'est le cœur du zero-trust :
+  # SSH n'existe au pare-feu que pour l'IP qui en a besoin, le temps du job.
+  dynamic "rule" {
+    for_each = var.allowed_ssh_cidr == "" ? [] : [var.allowed_ssh_cidr]
+    content {
+      direction  = "in"
+      protocol   = "tcp"
+      port       = "22"
+      source_ips = [rule.value]
+    }
   }
   rule {
     direction  = "in"

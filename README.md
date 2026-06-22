@@ -229,6 +229,26 @@ Ansible configure la machine de manière idempotente : installation de k3s, inst
 
 ArgoCD surveille l'état déclaré dans Git et réconcilie le cluster automatiquement.
 
+## Durcissement & accès serveur
+
+L'administration courante de la plateforme passe par GitOps (ArgoCD) et `kubectl`, pas par SSH. SSH est traité comme un accès *break-glass* : un canal de secours pour le provisioning et le debug, jamais un accès d'administration permanent. Trois mécanismes complémentaires (défense en profondeur) :
+
+**1. Accès SSH juste-à-temps (zero-trust réseau).** Le port 22 est **fermé par défaut** sur le firewall Hetzner (`allowed_ssh_cidr = ""`). Le workflow `infra` l'ouvre uniquement pour l'IP du runner GitHub (`<ip>/32`) le temps d'exécuter Ansible, puis le **referme systématiquement** — y compris si Ansible échoue, grâce à un step `if: always()`. SSH n'est donc jamais exposé en permanence : un scan Internet sur le port 22 ne trouve rien au repos.
+
+```text
+Au repos          : 22 fermé  │ 80/443 ouverts (le service)
+Pendant le job    : CI ouvre 22 pour l'IP du runner → Ansible → CI referme 22
+Admin courante    : GitOps (ArgoCD) + kubectl, pas SSH
+```
+
+**2. Service SSH et OS durcis.** Le durcissement n'est pas écrit à la main : le playbook applique les baselines auditées de la collection [`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening) (rôles `ssh_hardening` et `os_hardening`). Authentification par mot de passe désactivée, root autorisé par clé uniquement (`prohibit-password`, requis pour qu'Ansible se connecte), algorithmes cryptographiques obsolètes retirés, `sysctl` réseau durcis. Les variables sont adaptées aux contraintes de k3s (forwarding réseau et modules noyau réactivés).
+
+**3. Filets de sécurité.** `fail2ban` bannit les IP qui tentent du brute-force SSH, et `unattended-upgrades` applique automatiquement les correctifs de sécurité OS.
+
+Le token API Hetzner ne transite jamais par GitHub : Terraform s'exécute en mode Remote sur Terraform Cloud, où sont stockés le `hcloud_token` et la clé publique SSH. GitHub ne détient que le jeton d'API Terraform Cloud et la clé privée SSH dédiée au serveur.
+
+> Pour une cible réglementée, l'étape suivante serait l'application des benchmarks CIS/STIG complets (rôles [`ansible-lockdown`](https://github.com/ansible-lockdown)) avec audit de conformité `goss`, et le remplacement des clés SSH statiques par des certificats éphémères (CA SSH type Vault/Teleport) ou une authentification CI par OIDC.
+
 ## Livraison applicative
 
 La branche `main` contient le code source. La branche `deploy/prod` contient l'état exact déployé par ArgoCD, avec les tags d'images immuables.
@@ -263,6 +283,7 @@ Ce flux évite `latest` comme source de vérité. Git indique précisément quel
 |------------|--------|
 | Infrastructure | Terraform, Hetzner Cloud |
 | Bootstrap serveur | Ansible |
+| Durcissement | devsec.hardening (ssh + os), fail2ban, unattended-upgrades |
 | Orchestration | k3s |
 | GitOps | ArgoCD |
 | Identité | SPIFFE / SPIRE |

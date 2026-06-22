@@ -1,0 +1,11 @@
+---
+# Collections Ansible requises par le playbook.
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  # Pilotage de k3s/kubernetes (déjà utilisé par les rôles spire/argocd/observability).
+  - name: kubernetes.core
+
+  # Durcissement audité (baselines dev-sec) : sshd + OS. On applique un
+  # référentiel maintenu plutôt qu'une config sshd écrite à la main.
+  - name: devsec.hardening
+    version: ">=10.0.0"

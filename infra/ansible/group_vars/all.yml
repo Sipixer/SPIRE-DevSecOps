@@ -1,6 +1,28 @@
 ---
 # Variables partagées par tous les rôles.
 
+# --- Durcissement (collection devsec.hardening) ---
+# Baselines dev-sec appliquées par les rôles ssh_hardening et os_hardening.
+# On surcharge le strict nécessaire pour rester compatible avec deux contraintes :
+#   1. la CI se connecte en root par clé SSH (Ansible become) ;
+#   2. k3s a besoin du forwarding réseau et des modules noyau.
+
+# sshd : root autorisé PAR CLÉ uniquement (jamais par mot de passe), sinon le
+# prochain run Ansible se verrouille dehors. Le password login reste coupé
+# (ssh_server_password_login: false est déjà le défaut du rôle) → anti-brute-force.
+ssh_permit_root_login: "without-password"
+
+# os_hardening durcit les sysctl ; ip_forward=0 par défaut casserait le routage
+# des pods k3s. On réautorise UNIQUEMENT le forwarding, le reste du durcissement
+# OS (rp_filter, martians, etc.) est conservé.
+sysctl_overwrite:
+  net.ipv4.ip_forward: 1
+  net.ipv6.conf.all.forwarding: 1
+
+# k3s charge des modules réseau (bridge, overlay, br_netfilter…). On désactive le
+# blacklistage de modules du rôle pour ne pas casser le réseau du cluster.
+os_modprobe_enabled: false
+
 # --- SPIRE ---
 spire_trust_domain: "example.org"
 spire_cluster_name: "spire"
