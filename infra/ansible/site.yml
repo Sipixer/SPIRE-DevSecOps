@@ -3,7 +3,7 @@
   hosts: all
   become: true
   pre_tasks:
-    # Défense en profondeur, en complément des baselines dev-sec :
+    # Durcissement du socle avant toute installation. Défense en profondeur :
     #   - fail2ban : bannit les IP qui tentent du brute-force SSH (filet de
     #     sécurité si jamais le port 22 est ouvert, ceinture + bretelles) ;
     #   - unattended-upgrades : patchs de sécurité OS appliqués automatiquement
@@ -32,11 +32,32 @@
           APT::Periodic::Update-Package-Lists "1";
           APT::Periodic::Unattended-Upgrade "1";
       tags: [hardening]
+
+    # Durcissement sshd minimal : authentification par mot de passe coupée
+    # (anti-brute-force) et root autorisé PAR CLÉ uniquement — la CI se connecte
+    # en root par clé, donc on garde "prohibit-password" et pas "no". Déposé en
+    # drop-in pour ne pas réécrire tout sshd_config.
+    - name: Durcir sshd (drop-in)
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/99-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin prohibit-password
+          PubkeyAuthentication yes
+          X11Forwarding no
+          MaxAuthTries 3
+      notify: Redémarrer sshd
+      tags: [hardening]
+  handlers:
+    - name: Redémarrer sshd
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
   roles:
-    # Durcissement en premier : on sécurise le socle (sshd + OS) avant d'installer
-    # quoi que ce soit. Baselines dev-sec, surchargées dans group_vars/all.yml.
-    - { role: devsec.hardening.os_hardening, tags: [hardening] }
-    - { role: devsec.hardening.ssh_hardening, tags: [hardening] }
     - { role: k3s, tags: [k3s] }
     - { role: spire, tags: [spire] }
     - { role: argocd, tags: [argocd] }

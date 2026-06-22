@@ -241,13 +241,13 @@ Pendant le job    : CI ouvre 22 pour l'IP du runner → Ansible → CI referme 2
 Admin courante    : GitOps (ArgoCD) + kubectl, pas SSH
 ```
 
-**2. Service SSH et OS durcis.** Le durcissement n'est pas écrit à la main : le playbook applique les baselines auditées de la collection [`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening) (rôles `ssh_hardening` et `os_hardening`). Authentification par mot de passe désactivée, root autorisé par clé uniquement (`prohibit-password`, requis pour qu'Ansible se connecte), algorithmes cryptographiques obsolètes retirés, `sysctl` réseau durcis. Les variables sont adaptées aux contraintes de k3s (forwarding réseau et modules noyau réactivés).
+**2. Service SSH durci.** Ansible dépose un drop-in `sshd_config` qui désactive l'authentification par mot de passe (anti-brute-force) et n'autorise root que par clé (`PermitRootLogin prohibit-password`, requis pour qu'Ansible se connecte), avec `MaxAuthTries` réduit et forwarding X11 coupé.
 
 **3. Filets de sécurité.** `fail2ban` bannit les IP qui tentent du brute-force SSH, et `unattended-upgrades` applique automatiquement les correctifs de sécurité OS.
 
 Le token API Hetzner ne transite jamais par GitHub : Terraform s'exécute en mode Remote sur Terraform Cloud, où sont stockés le `hcloud_token` et la clé publique SSH. GitHub ne détient que le jeton d'API Terraform Cloud et la clé privée SSH dédiée au serveur.
 
-> Pour une cible réglementée, l'étape suivante serait l'application des benchmarks CIS/STIG complets (rôles [`ansible-lockdown`](https://github.com/ansible-lockdown)) avec audit de conformité `goss`, et le remplacement des clés SSH statiques par des certificats éphémères (CA SSH type Vault/Teleport) ou une authentification CI par OIDC.
+> Pour un durcissement exhaustif, l'étape suivante serait l'application de baselines auditées ([`devsec.hardening`](https://github.com/dev-sec/ansible-collection-hardening)) ou des benchmarks CIS/STIG ([`ansible-lockdown`](https://github.com/ansible-lockdown)) avec audit `goss`, et le remplacement des clés SSH statiques par des certificats éphémères (CA SSH type Vault/Teleport) ou une authentification CI par OIDC.
 
 ## Livraison applicative
 
@@ -283,7 +283,7 @@ Ce flux évite `latest` comme source de vérité. Git indique précisément quel
 |------------|--------|
 | Infrastructure | Terraform, Hetzner Cloud |
 | Bootstrap serveur | Ansible |
-| Durcissement | devsec.hardening (ssh + os), fail2ban, unattended-upgrades |
+| Durcissement | sshd durci, fail2ban, unattended-upgrades, firewall JIT |
 | Orchestration | k3s |
 | GitOps | ArgoCD |
 | Identité | SPIFFE / SPIRE |

@@ -17,8 +17,8 @@ ansible-playbook ansible/site.yml \
 terraform -chdir=terraform apply -var "allowed_ssh_cidr="          # referme 22
 ```
 
-Ansible durcit le serveur (sshd + OS via `devsec.hardening`, fail2ban,
-unattended-upgrades), puis installe k3s, SPIRE, ArgoCD (qui surveille
+Ansible durcit le serveur (sshd, fail2ban, unattended-upgrades), puis installe
+k3s, SPIRE, ArgoCD (qui surveille
 `deploy/prod`) et l'observabilité. ArgoCD déploie ensuite les services depuis
 GHCR. En pratique, préférer le workflow GitHub `infra` qui gère l'ouverture et la
 fermeture SSH automatiquement.
