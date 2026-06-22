@@ -15,7 +15,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -82,21 +82,22 @@ func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Re
 	}
 }
 
-// callerID lit l'identité de l'appelant dans l'en-tête posé par le proxy
-// Linkerd. Le format est "<sa>.<ns>.serviceaccount.identity.linkerd.cluster.local".
-// On le réécrit en forme SPIFFE-like pour rester lisible côté front.
+// callerID lit l'identité de l'appelant dans l'en-tête X-Forwarded-Client-Cert
+// (XFCC) posé par le sidecar Istio après vérification du mTLS. Le champ URI
+// contient le SPIFFE ID de l'appelant (spiffe://cluster.local/ns/shop/sa/<sa>).
 func callerID(r *http.Request) string {
-	id := r.Header.Get("l5d-client-id")
-	if id == "" {
+	xfcc := r.Header.Get("X-Forwarded-Client-Cert")
+	if xfcc == "" {
 		return "(inconnu)"
 	}
-	// gateway.shop.serviceaccount... -> spiffe://shop/sa/gateway (lisible).
-	parts := strings.Split(id, ".")
-	if len(parts) >= 2 {
-		return "spiffe://" + parts[1] + "/sa/" + parts[0]
+	if m := xfccURI.FindStringSubmatch(xfcc); m != nil {
+		return m[1]
 	}
-	return id
+	return "(inconnu)"
 }
+
+// xfccURI extrait le champ URI=spiffe://... du header XFCC d'Istio.
+var xfccURI = regexp.MustCompile(`URI=([^;,]+)`)
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
