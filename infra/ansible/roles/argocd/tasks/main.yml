@@ -14,6 +14,7 @@
     helm upgrade --install argocd argo/argo-cd
     --version {{ argocd_chart_version }}
     --namespace {{ argocd_namespace }} --create-namespace
+    --set configs.params.server\.insecure=true
     --wait --timeout 5m
   environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
   changed_when: true
@@ -41,3 +42,30 @@
           syncOptions: [CreateNamespace=true]
       EOF
   changed_when: true
+
+# --- Accès à l'UI ArgoCD via Cloudflare Tunnel (optionnel) ---
+# Activé seulement si cloudflared_tunnel_token est fourni (output Terraform passé
+# par la CI). Le token n'est jamais committé : il vit dans un Secret k8s créé ici.
+- name: Secret du token de tunnel cloudflared
+  ansible.builtin.command:
+    cmd: >-
+      k3s kubectl -n {{ argocd_namespace }} create secret generic cloudflared-token
+      --from-literal=token={{ cloudflared_tunnel_token }}
+      --dry-run=client -o yaml
+  register: cloudflared_secret_yaml
+  changed_when: false
+  when: cloudflared_tunnel_token | default('') | length > 0
+
+- name: Appliquer le Secret cloudflared
+  ansible.builtin.shell:
+    cmd: "k3s kubectl apply -f -"
+    stdin: "{{ cloudflared_secret_yaml.stdout }}"
+  changed_when: true
+  when: cloudflared_tunnel_token | default('') | length > 0
+
+- name: Déployer le connecteur cloudflared
+  ansible.builtin.shell:
+    cmd: "k3s kubectl apply -f -"
+    stdin: "{{ lookup('template', 'cloudflared.yaml.j2') }}"
+  changed_when: true
+  when: cloudflared_tunnel_token | default('') | length > 0

@@ -93,9 +93,15 @@ jobs:
         run: |
           pip install ansible
           ansible-galaxy collection install -r ansible/requirements.yml
+          # Token du tunnel Cloudflare (output sensible) passé à Ansible pour
+          # créer le Secret cloudflared. ::add-mask:: empêche son apparition dans
+          # les logs ; il n'est jamais committé (seulement dans un Secret k8s).
+          TUNNEL_TOKEN="$(terraform -chdir=terraform output -raw cloudflared_tunnel_token)"
+          echo "::add-mask::${TUNNEL_TOKEN}"
           ansible-playbook ansible/site.yml \
             -i "${{ steps.tf.outputs.ip }}," \
-            -u root --private-key ../key
+            -u root --private-key ../key \
+            -e "cloudflared_tunnel_token=${TUNNEL_TOKEN}"
 
       # JIT : referme le port 22 quoi qu'il arrive (même si Ansible a échoué).
       # C'est ce `always()` qui garantit qu'on ne laisse jamais SSH ouvert.

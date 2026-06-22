@@ -33,6 +33,36 @@ variable "ssh_public_key" {
   type        = string
 }
 
+variable "cloudflare_api_token" {
+  description = "Token API Cloudflare (Tunnel + Access + DNS). Variable sensitive du workspace Terraform Cloud."
+  type        = string
+  sensitive   = true
+}
+
+variable "cloudflare_account_id" {
+  description = "ID du compte Cloudflare propriétaire du tunnel et de la zone"
+  type        = string
+  default     = "37da22730527e0b95523e6f5e3792309"
+}
+
+variable "cloudflare_zone" {
+  description = "Domaine géré par Cloudflare"
+  type        = string
+  default     = "sylvainrougie.fr"
+}
+
+variable "argocd_hostname" {
+  description = "Sous-domaine exposant l'UI ArgoCD via le tunnel Cloudflare"
+  type        = string
+  default     = "argocd.sylvainrougie.fr"
+}
+
+variable "access_allowed_email" {
+  description = "Email autorisé à passer Cloudflare Access pour atteindre ArgoCD"
+  type        = string
+  default     = "sipixer@gmail.com"
+}
+
 variable "allowed_ssh_cidr" {
   description = <<-EOT
     CIDR autorisé pour SSH. Vide ("") = port 22 FERMÉ (état au repos, zero-trust).
