@@ -15,6 +15,16 @@ istio_helm_repo: "https://istio-release.storage.googleapis.com/charts"
 kiali_chart_version: "1.89.0"
 kiali_helm_repo: "https://kiali.org/helm-charts"
 
+# Dashboards Grafana officiels d'Istio (grafana.com). Importés par le rôle
+# observability via le sidecar dashboards de Grafana. id = ID grafana.com,
+# rev = révision compatible Istio 1.24.
+istio_grafana_dashboards:
+  - { name: "mesh", id: 7639, rev: 192 }
+  - { name: "service", id: 7636, rev: 192 }
+  - { name: "workload", id: 7630, rev: 192 }
+  - { name: "control-plane", id: 7645, rev: 192 }
+  - { name: "performance", id: 11829, rev: 192 }
+
 # --- ArgoCD ---
 argocd_namespace: "argocd"
 argocd_chart_version: "7.7.7"

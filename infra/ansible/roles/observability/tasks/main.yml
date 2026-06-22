@@ -46,3 +46,43 @@
     --namespace {{ monitoring_namespace }}
     grafana_dashboard=1 --overwrite
   changed_when: true
+
+# --- Dashboards Istio (v2) ---
+# Les 6 dashboards officiels Istio (mesh, service, workload, control plane,
+# performance, wasm), publiés sur grafana.com. On les télécharge et on les
+# expose à Grafana via le sidecar dashboards (label grafana_dashboard), comme
+# le dashboard SPIRE. Ils consomment les métriques Istio scrapées par Prometheus.
+- name: Télécharger les dashboards Istio depuis grafana.com
+  ansible.builtin.get_url:
+    url: "https://grafana.com/api/dashboards/{{ item.id }}/revisions/{{ item.rev }}/download"
+    dest: "/tmp/istio-{{ item.name }}.json"
+    mode: "0644"
+  loop: "{{ istio_grafana_dashboards }}"
+
+# Le JSON téléchargé contient un placeholder de datasource (${DS_PROMETHEUS}).
+# On le remplace par le nom de la datasource Prometheus par défaut du chart
+# (« Prometheus ») pour que le dashboard pointe sur la bonne source sans clic.
+- name: Adapter la datasource Prometheus dans les dashboards Istio
+  ansible.builtin.replace:
+    path: "/tmp/istio-{{ item.name }}.json"
+    regexp: '\$\{DS_PROMETHEUS\}'
+    replace: "Prometheus"
+  loop: "{{ istio_grafana_dashboards }}"
+
+- name: ConfigMaps des dashboards Istio
+  ansible.builtin.shell:
+    cmd: |
+      k3s kubectl create configmap grafana-dashboard-istio-{{ item.name }} \
+        --namespace {{ monitoring_namespace }} \
+        --from-file=istio-{{ item.name }}.json=/tmp/istio-{{ item.name }}.json \
+        --dry-run=client -o yaml | k3s kubectl apply -f -
+  loop: "{{ istio_grafana_dashboards }}"
+  changed_when: true
+
+- name: Label grafana_dashboard sur les ConfigMaps Istio
+  ansible.builtin.command: >-
+    k3s kubectl label configmap grafana-dashboard-istio-{{ item.name }}
+    --namespace {{ monitoring_namespace }}
+    grafana_dashboard=1 --overwrite
+  loop: "{{ istio_grafana_dashboards }}"
+  changed_when: true

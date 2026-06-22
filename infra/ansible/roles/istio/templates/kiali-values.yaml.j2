@@ -14,3 +14,8 @@ external_services:
   prometheus:
     # Service Prometheus de kube-prometheus-stack dans le namespace monitoring.
     url: "http://kube-prometheus-stack-prometheus.{{ monitoring_namespace }}.svc.cluster.local:9090"
+  # Branche Grafana pour que Kiali connaisse sa version et propose les liens
+  # « View in Grafana » vers les dashboards Istio (corrige le « unknown »).
+  grafana:
+    enabled: true
+    internal_url: "http://kube-prometheus-stack-grafana.{{ monitoring_namespace }}.svc.cluster.local"
