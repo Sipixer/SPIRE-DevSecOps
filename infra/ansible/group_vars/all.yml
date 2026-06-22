@@ -3,13 +3,17 @@
 # Le durcissement (sshd, fail2ban, unattended-upgrades) est appliqué directement
 # dans site.yml ; pas de variable dédiée nécessaire ici.
 
-# --- SPIRE ---
-spire_trust_domain: "example.org"
-spire_cluster_name: "spire"
-spire_namespace: "spire"
-spire_chart_version: "0.29.0"
-spire_crds_chart_version: "0.5.0"
-spire_helm_repo: "https://spiffe.github.io/helm-charts-hardened/"
+# --- Istio (service mesh, v2) ---
+# Remplace SPIRE : le mTLS, l'identité et l'autorisation sont désormais portés
+# par le mesh. La v1 (SPIRE + mTLS câblé à la main) reste consultable sur le
+# tag/branche v1-manual-mtls.
+istio_namespace: "istio-system"
+istio_chart_version: "1.24.1"
+istio_helm_repo: "https://istio-release.storage.googleapis.com/charts"
+
+# --- Kiali (dashboard du mesh) ---
+kiali_chart_version: "1.89.0"
+kiali_helm_repo: "https://kiali.org/helm-charts"
 
 # --- ArgoCD ---
 argocd_namespace: "argocd"
@@ -34,7 +38,6 @@ prometheus_helm_repo: "https://prometheus-community.github.io/helm-charts"
 grafana_host: "grafana.localhost"
 grafana_admin_user: "admin"
 grafana_admin_password: "admin"
-# Ports /metrics des services métier (HTTP en clair, interne au cluster).
-metrics_port: 9100
-# Liste des services Go scrappés sur leur port /metrics HTTP dédié.
-metrics_services: [gateway, orders, catalog, payments, analytics]
+# v2 : les métriques applicatives (RPS, latence, codes, mTLS) sont produites par
+# les sidecars Istio et scrappées via les annotations Prometheus standard du
+# mesh — plus de port /metrics maison (9100) ni de liste de services à scraper.

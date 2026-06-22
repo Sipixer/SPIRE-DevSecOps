@@ -1,46 +1,24 @@
-// Payments est un service sensible. L'autorisation se fait à deux niveaux :
-//  1. au handshake mTLS : on n'accepte que les identités du trust domain ;
-//  2. par route, dans le code : chaque route déclare qui a le droit de l'appeler,
-//     l'identité étant lue dans le certificat client (non falsifiable).
+// Payments est un service sensible. En v2, l'identité et l'autorisation sont
+// portées par le service mesh (Linkerd) :
+//  1. le mTLS est automatique entre proxies (l'app parle HTTP clair en local) ;
+//  2. l'autorisation par route est déclarée hors du code, dans des
+//     AuthorizationPolicy Linkerd (voir k8s/workloads/authz.yaml). Une requête
+//     qui n'est pas autorisée n'atteint JAMAIS ce code : le proxy la rejette.
+//
+// L'app garde un journal d'appels pour le front : l'identité de l'appelant est
+// désormais fournie par Linkerd via l'en-tête l5d-client-id (non falsifiable,
+// posé par le proxy après vérification du mTLS).
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
-	"slices"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
-	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
-	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
-
-const trustDomain = "example.org"
-
-// Identités des services, pour rendre la politique lisible.
-const (
-	gatewayID  = "spiffe://example.org/ns/shop/sa/gateway"
-	ordersID   = "spiffe://example.org/ns/shop/sa/orders"
-	catalogID  = "spiffe://example.org/ns/shop/sa/catalog"
-	paymentsID = "spiffe://example.org/ns/shop/sa/payments"
-)
-
-// policy déclare, pour chaque route, la liste blanche des appelants autorisés.
-//
-//	/pay     : déclencher un paiement — réservé à Orders.
-//	/_calls  : consulter le journal d'appels — réservé à la Gateway (pour le front).
-var policy = map[string][]string{
-	"/pay":    {ordersID},
-	"/_calls": {gatewayID},
-}
-
-// authzDisabled coupe la décision par route : l'identité reste lue et
-// journalisée (mTLS actif), mais tout appelant du trust domain est autorisé.
-var authzDisabled bool
 
 type callEntry struct {
 	Caller    string    `json:"caller"`
@@ -72,81 +50,52 @@ func (l *callLog) snapshot() []callEntry {
 }
 
 func main() {
-	ctx := context.Background()
-	socketPath := getenv("SPIFFE_ENDPOINT_SOCKET", "unix:///run/spire/sockets/spire-agent.sock")
-	authzDisabled = os.Getenv("AUTHZ_DISABLED") == "true"
-
-	source, err := workloadapi.NewX509Source(ctx,
-		workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
-	if err != nil {
-		log.Fatalf("payments: impossible d'obtenir un SVID via le Workload API: %v", err)
-	}
-	defer source.Close()
-
-	svid, err := source.GetX509SVID()
-	if err != nil {
-		log.Fatalf("payments: pas de SVID disponible: %v", err)
-	}
-	log.Printf("payments: identité %s", svid.ID)
-
 	logbook := &callLog{}
 
-	go serveMetrics()
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("/pay", guard("/pay", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
-		log.Printf("payments: paiement autorisé pour %s", caller)
+	mux.HandleFunc("/pay", logged("/pay", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
+		log.Printf("payments: paiement pour %s", caller)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "paid", "caller": caller})
 	}))
-	mux.HandleFunc("/_calls", guard("/_calls", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
+	mux.HandleFunc("/_calls", logged("/_calls", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
 		writeJSON(w, http.StatusOK, logbook.snapshot())
 	}))
 
-	// Au handshake, on accepte toute identité du trust domain ; le filtrage
-	// fin par route est fait ensuite par guard().
-	td, _ := spiffeid.TrustDomainFromString(trustDomain)
-	tlsConfig := tlsconfig.MTLSServerConfig(source, source, tlsconfig.AuthorizeMemberOf(td))
-
-	server := &http.Server{Addr: ":8443", Handler: mux, TLSConfig: tlsConfig}
-	log.Println("payments: écoute en mTLS sur :8443")
-	log.Fatal(server.ListenAndServeTLS("", ""))
+	addr := getenv("LISTEN_ADDR", ":8080")
+	log.Printf("payments: écoute en HTTP sur %s (mTLS assuré par le mesh)", addr)
+	log.Fatal(http.ListenAndServe(addr, mux)) // nosemgrep: go.lang.security.audit.net.use-tls.use-tls
 }
 
-// guard applique la politique de la route : il lit l'identité de l'appelant
-// dans le certificat, vérifie la liste blanche, journalise, puis délègue.
-func guard(route string, logbook *callLog, h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+// logged journalise l'appel puis délègue. Il ne décide plus de l'autorisation :
+// c'est le proxy Linkerd qui l'a déjà fait en amont (AuthorizationPolicy). Toute
+// requête qui arrive ici a donc été autorisée — d'où Allowed: true. Les refus
+// sont visibles dans Linkerd Viz (réponses 403 émises par le proxy), pas ici.
+func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := callerID(r)
-		allowed := authzDisabled || slices.Contains(policy[route], caller)
-		recordAuthz(allowed)
 		// /_calls est une route d'introspection (lecture du journal par le front) ;
 		// on ne la journalise pas pour ne pas noyer les vrais appels métier.
 		if route != "/_calls" {
-			logbook.record(callEntry{Caller: caller, Route: route, Allowed: allowed, Timestamp: time.Now()})
+			logbook.record(callEntry{Caller: caller, Route: route, Allowed: true, Timestamp: time.Now()})
 		}
-		if !allowed {
-			log.Printf("payments: %s REFUSÉ sur %s", caller, route)
-			recordRequest(route, http.StatusForbidden)
-			writeJSON(w, http.StatusForbidden, map[string]any{
-				"allowed": false, "route": route, "caller": caller,
-				"reason": "identité non autorisée pour cette route",
-			})
-			return
-		}
-		recordRequest(route, http.StatusOK)
 		h(w, r, caller)
 	}
 }
 
+// callerID lit l'identité de l'appelant dans l'en-tête posé par le proxy
+// Linkerd. Le format est "<sa>.<ns>.serviceaccount.identity.linkerd.cluster.local".
+// On le réécrit en forme SPIFFE-like pour rester lisible côté front.
 func callerID(r *http.Request) string {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.PeerCertificates[0].URIs) == 0 {
+	id := r.Header.Get("l5d-client-id")
+	if id == "" {
 		return "(inconnu)"
 	}
-	id, err := spiffeid.FromURI(r.TLS.PeerCertificates[0].URIs[0])
-	if err != nil {
-		return "(invalide)"
+	// gateway.shop.serviceaccount... -> spiffe://shop/sa/gateway (lisible).
+	parts := strings.Split(id, ".")
+	if len(parts) >= 2 {
+		return "spiffe://" + parts[1] + "/sa/" + parts[0]
 	}
-	return id.String()
+	return id
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

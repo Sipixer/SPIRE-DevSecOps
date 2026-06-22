@@ -1,40 +1,26 @@
-// Analytics : app Node.js derrière Envoy, qui porte le mTLS et transmet
-// l'identité du pair via header. L'app écoute en clair : seule Envoy l'atteint.
+// Analytics : app Node.js. En v2, le mTLS est porté par le sidecar Istio
+// (injecté automatiquement) — plus d'Envoy maison à configurer. L'app écoute
+// en clair sur :8080 ; seul le sidecar l'atteint. L'identité de l'appelant est
+// transmise par Istio via l'en-tête X-Forwarded-Client-Cert (XFCC), champ
+// URI=spiffe://... — non falsifiable, posé après vérification du mTLS.
 "use strict";
 
 const http = require("http");
 
-const HOST = "127.0.0.1";
-const PORT = 9090;
-const METRICS_PORT = 9100;
+const HOST = "0.0.0.0";
+const PORT = Number(process.env.LISTEN_PORT || 8080);
 
 let eventsTotal = 0;
 const eventsByCaller = new Map();
 
-// Envoy pose soit x-spiffe-id, soit le XFCC standard (champ URI=spiffe://...).
+// Istio pose le XFCC standard (champ URI=spiffe://cluster.local/ns/<ns>/sa/<sa>).
 function callerFromHeaders(headers) {
-  const direct = headers["x-spiffe-id"];
-  if (direct) return direct;
   const xfcc = headers["x-forwarded-client-cert"];
   if (xfcc) {
     const match = xfcc.match(/URI=([^;,]+)/i);
     if (match) return match[1];
   }
   return "unknown";
-}
-
-function metrics() {
-  const lines = [
-    "# HELP analytics_events_total Nombre total d'événements reçus.",
-    "# TYPE analytics_events_total counter",
-    `analytics_events_total ${eventsTotal}`,
-    "# HELP analytics_events_by_caller_total Événements reçus par identité SPIFFE appelante.",
-    "# TYPE analytics_events_by_caller_total counter",
-  ];
-  for (const [caller, count] of eventsByCaller) {
-    lines.push(`analytics_events_by_caller_total{caller="${caller}"} ${count}`);
-  }
-  return lines.join("\n") + "\n";
 }
 
 const server = http.createServer((req, res) => {
@@ -44,11 +30,6 @@ const server = http.createServer((req, res) => {
     eventsByCaller.set(caller, (eventsByCaller.get(caller) || 0) + 1);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ ok: true, caller, events: eventsTotal }));
-    return;
-  }
-  if (req.method === "GET" && req.url === "/metrics") {
-    res.writeHead(200, { "content-type": "text/plain; version=0.0.4" });
-    res.end(metrics());
     return;
   }
   if (req.method === "GET" && req.url === "/healthz") {
@@ -61,18 +42,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`analytics: écoute sur http://${HOST}:${PORT} (derrière Envoy)`);
+  console.log(`analytics: écoute sur http://${HOST}:${PORT} (mTLS assuré par le sidecar Istio)`);
 });
-
-// Second serveur /metrics exposé au cluster en clair (scrape Prometheus).
-http
-  .createServer((req, res) => {
-    if (req.method === "GET" && req.url === "/metrics") {
-      res.writeHead(200, { "content-type": "text/plain; version=0.0.4" });
-      res.end(metrics());
-      return;
-    }
-    res.writeHead(404);
-    res.end();
-  })
-  .listen(METRICS_PORT, "0.0.0.0");

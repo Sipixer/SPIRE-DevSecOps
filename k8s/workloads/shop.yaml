@@ -1,16 +1,22 @@
-# Namespace de la boutique + les 4 services.
-# Chaque service a son propre ServiceAccount : c'est lui qui détermine le
-# SPIFFE ID attribué par SPIRE (spiffe://example.org/ns/shop/sa/<name>).
+# Namespace de la boutique + les 4 services Go.
+# En v2, l'identité et le mTLS sont portés par Istio (sidecar Envoy injecté
+# automatiquement, label istio-injection=enabled sur le namespace). Chaque
+# service garde son ServiceAccount : c'est lui qui détermine l'identité Istio
+# (spiffe://cluster.local/ns/shop/sa/<name>) utilisée pour le mTLS et les
+# AuthorizationPolicy. Les apps parlent HTTP clair sur :8080 ; plus de socket
+# SPIRE, plus de port mTLS 8443, plus de port métriques 9100 (Istio les expose).
 #
-# Chaîne d'appels (tout en mTLS sauf le navigateur -> Gateway en HTTP) :
+# Chaîne d'appels (navigateur -> gateway en HTTP ; tout le reste en mTLS Istio) :
 #   navigateur --HTTP--> gateway --mTLS--> orders --mTLS--> payments
 #                        gateway --mTLS--> catalog
 apiVersion: v1
 kind: Namespace
 metadata:
   name: shop
+  labels:
+    istio-injection: enabled
 ---
-# --- ServiceAccounts (= identités SPIFFE) ---
+# --- ServiceAccounts (= identités Istio) ---
 apiVersion: v1
 kind: ServiceAccount
 metadata: { name: gateway, namespace: shop }
@@ -27,7 +33,8 @@ apiVersion: v1
 kind: ServiceAccount
 metadata: { name: payments, namespace: shop }
 ---
-# --- Payments : serveur mTLS, n'autorise qu'Orders ---
+# --- Payments : HTTP clair, l'autorisation (/pay réservé à Orders) est faite
+#     par l'AuthorizationPolicy Istio (voir authz.yaml), pas par le code. ---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: payments, namespace: shop, labels: { app: payments } }
@@ -45,24 +52,16 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-          ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
-          env:
-            - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
-          volumeMounts:
-            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
-      volumes:
-        # Le SPIFFE CSI driver monte le socket du Workload API en lecture seule.
-        - name: spire-agent-socket
-          csi: { driver: csi.spiffe.io, readOnly: true }
+          ports: [{ containerPort: 8080 }]
 ---
 apiVersion: v1
 kind: Service
 metadata: { name: payments, namespace: shop }
 spec:
   selector: { app: payments }
-  ports: [{ name: app, port: 8443, targetPort: 8443 }, { name: metrics, port: 9100, targetPort: 9100 }]
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
 ---
-# --- Catalog : serveur mTLS, n'autorise que la Gateway ---
+# --- Catalog : HTTP clair, /products réservé à la Gateway (via AuthorizationPolicy) ---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: catalog, namespace: shop, labels: { app: catalog } }
@@ -80,23 +79,17 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-          ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
-          env:
-            - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
-          volumeMounts:
-            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
-      volumes:
-        - name: spire-agent-socket
-          csi: { driver: csi.spiffe.io, readOnly: true }
+          ports: [{ containerPort: 8080 }]
 ---
 apiVersion: v1
 kind: Service
 metadata: { name: catalog, namespace: shop }
 spec:
   selector: { app: catalog }
-  ports: [{ name: app, port: 8443, targetPort: 8443 }, { name: metrics, port: 9100, targetPort: 9100 }]
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
 ---
-# --- Orders : serveur mTLS (autorise Gateway) + client mTLS vers Payments ---
+# --- Orders : HTTP clair. Reçoit la Gateway, appelle Payments. Le mTLS vers
+#     Payments est ajouté par le sidecar Istio de façon transparente. ---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: orders, namespace: shop, labels: { app: orders } }
@@ -114,24 +107,18 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-          ports: [{ containerPort: 8443 }, { containerPort: 9100 }]
+          ports: [{ containerPort: 8080 }]
           env:
-            - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
-            - { name: PAYMENTS_URL, value: https://payments.shop.svc.cluster.local:8443/pay }
-          volumeMounts:
-            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
-      volumes:
-        - name: spire-agent-socket
-          csi: { driver: csi.spiffe.io, readOnly: true }
+            - { name: PAYMENTS_URL, value: http://payments.shop.svc.cluster.local:8080/pay }
 ---
 apiVersion: v1
 kind: Service
 metadata: { name: orders, namespace: shop }
 spec:
   selector: { app: orders }
-  ports: [{ name: app, port: 8443, targetPort: 8443 }, { name: metrics, port: 9100, targetPort: 9100 }]
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
 ---
-# --- Gateway : porte d'entrée. HTTP côté navigateur, mTLS vers Orders/Catalog ---
+# --- Gateway : porte d'entrée. HTTP côté navigateur, mTLS Istio vers les services ---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: gateway, namespace: shop, labels: { app: gateway } }
@@ -149,23 +136,19 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 200m, memory: 128Mi }
-          ports: [{ containerPort: 8080 }, { containerPort: 9100 }]
+          ports: [{ containerPort: 8080 }]
           env:
-            - { name: SPIFFE_ENDPOINT_SOCKET, value: unix:///run/spire/sockets/spire-agent.sock }
-            - { name: ORDERS_URL, value: https://orders.shop.svc.cluster.local:8443 }
-            - { name: CATALOG_URL, value: https://catalog.shop.svc.cluster.local:8443 }
-          volumeMounts:
-            - { name: spire-agent-socket, mountPath: /run/spire/sockets, readOnly: true }
-      volumes:
-        - name: spire-agent-socket
-          csi: { driver: csi.spiffe.io, readOnly: true }
+            - { name: ORDERS_URL, value: http://orders.shop.svc.cluster.local:8080 }
+            - { name: CATALOG_URL, value: http://catalog.shop.svc.cluster.local:8080 }
+            - { name: PAYMENTS_URL, value: http://payments.shop.svc.cluster.local:8080 }
+            - { name: ANALYTICS_URL, value: http://analytics.shop.svc.cluster.local:8080 }
 ---
 apiVersion: v1
 kind: Service
 metadata: { name: gateway, namespace: shop }
 spec:
   selector: { app: gateway }
-  ports: [{ name: app, port: 8080, targetPort: 8080 }, { name: metrics, port: 9100, targetPort: 9100 }]
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
 ---
 # Expose la Gateway au navigateur via l'ingress Traefik (inclus dans k3s).
 apiVersion: networking.k8s.io/v1
