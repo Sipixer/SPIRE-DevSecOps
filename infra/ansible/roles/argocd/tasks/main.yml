@@ -9,12 +9,25 @@
   changed_when: false
   environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
 
+# argocd-server en mode insecure : le TLS est terminé par Cloudflare en amont.
+# Sans ça, ArgoCD redirige HTTP->HTTPS et provoque une boucle (ERR_TOO_MANY_REDIRECTS)
+# derrière le tunnel. La clé Helm "server.insecure" contient un point littéral :
+# on passe par un fichier values pour éviter tout problème d'échappement.
+- name: Values ArgoCD (insecure derrière le tunnel)
+  ansible.builtin.copy:
+    dest: /tmp/argocd-values.yaml
+    content: |
+      configs:
+        params:
+          server.insecure: true
+    mode: "0644"
+
 - name: Installer ArgoCD
   ansible.builtin.command: >-
     helm upgrade --install argocd argo/argo-cd
     --version {{ argocd_chart_version }}
     --namespace {{ argocd_namespace }} --create-namespace
-    --set configs.params.server\.insecure=true
+    --values /tmp/argocd-values.yaml
     --wait --timeout 5m
   environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
   changed_when: true
