@@ -1,0 +1,16 @@
+# Kiali : dashboard du mesh Istio. Lecture seule, branché sur le Prometheus de
+# la stack observability (kube-prometheus-stack) déjà déployée — pas de
+# Prometheus dédié à monter. L'accès se fait via port-forward / tunnel (pas
+# d'exposition publique : zero-trust réseau conservé, cf. accès Grafana/ArgoCD).
+auth:
+  strategy: anonymous
+
+deployment:
+  view_only_mode: false
+
+external_services:
+  istio:
+    root_namespace: {{ istio_namespace }}
+  prometheus:
+    # Service Prometheus de kube-prometheus-stack dans le namespace monitoring.
+    url: "http://kube-prometheus-stack-prometheus.{{ monitoring_namespace }}.svc.cluster.local:9090"

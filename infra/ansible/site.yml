@@ -59,6 +59,9 @@
         state: restarted
   roles:
     - { role: k3s, tags: [k3s] }
-    - { role: spire, tags: [spire] }
+    # v2 : Istio (service mesh) remplace SPIRE. Le mTLS, l'identité et
+    # l'autorisation sont portés par le mesh ; le rôle spire/ est conservé dans
+    # le dépôt pour la démo d'évolution (v1) mais n'est plus joué.
+    - { role: istio, tags: [istio] }
     - { role: argocd, tags: [argocd] }
     - { role: observability, tags: [observability] }

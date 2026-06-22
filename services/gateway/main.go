@@ -1,10 +1,12 @@
 // Gateway est la porte d'entrée. Le navigateur lui parle en HTTP simple ;
-// elle relaie vers Orders et Catalog en mTLS, en présentant son SVID. Elle
-// sert aussi le front et agrège les journaux d'appels de chaque service.
+// elle relaie vers Orders, Catalog, Payments et Analytics. En v2, le mTLS
+// inter-services est porté par le mesh (Linkerd) : la Gateway fait du HTTP
+// clair vers chaque service, et le proxy chiffre/authentifie de façon
+// transparente. Plus de client mTLS à construire à la main. Elle sert aussi le
+// front et agrège les journaux d'appels de chaque service.
 package main
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"io"
@@ -13,88 +15,70 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
-	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
-	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
 //go:embed static
 var staticFiles embed.FS
 
 func main() {
-	ctx := context.Background()
-	socketPath := getenv("SPIFFE_ENDPOINT_SOCKET", "unix:///run/spire/sockets/spire-agent.sock")
-	ordersURL := getenv("ORDERS_URL", "https://orders.shop.svc.cluster.local:8443")
-	catalogURL := getenv("CATALOG_URL", "https://catalog.shop.svc.cluster.local:8443")
-	paymentsURL := getenv("PAYMENTS_URL", "https://payments.shop.svc.cluster.local:8443")
-	analyticsURL := getenv("ANALYTICS_URL", "https://analytics.shop.svc.cluster.local:8443")
+	ordersURL := getenv("ORDERS_URL", "http://orders.shop.svc.cluster.local:8080")
+	catalogURL := getenv("CATALOG_URL", "http://catalog.shop.svc.cluster.local:8080")
+	paymentsURL := getenv("PAYMENTS_URL", "http://payments.shop.svc.cluster.local:8080")
+	analyticsURL := getenv("ANALYTICS_URL", "http://analytics.shop.svc.cluster.local:8080")
 
-	source, err := workloadapi.NewX509Source(ctx,
-		workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
-	if err != nil {
-		log.Fatalf("gateway: impossible d'obtenir un SVID via le Workload API: %v", err)
-	}
-	defer source.Close()
+	// Un seul client HTTP suffit : le mesh ajoute le mTLS et n'autorise que les
+	// destinations permises par les AuthorizationPolicy. L'identité de la Gateway
+	// est portée par son ServiceAccount, présentée automatiquement par le proxy.
+	client := &http.Client{Timeout: 5 * time.Second}
 
-	svid, err := source.GetX509SVID()
-	if err != nil {
-		log.Fatalf("gateway: pas de SVID disponible: %v", err)
-	}
-	log.Printf("gateway: identité %s", svid.ID)
-
-	orders := mtlsClient(source, "spiffe://example.org/ns/shop/sa/orders")
-	catalog := mtlsClient(source, "spiffe://example.org/ns/shop/sa/catalog")
-	payments := mtlsClient(source, "spiffe://example.org/ns/shop/sa/payments")
-	analytics := mtlsClient(source, "spiffe://example.org/ns/shop/sa/analytics")
-
-	go serveMetrics()
+	// Les métriques (RPS, latence, codes HTTP, mTLS) sont produites par le proxy
+	// Linkerd : plus de listener /metrics ni de compteurs maison côté app.
 
 	mux := http.NewServeMux()
 
 	// --- Routes côté navigateur (HTTP simple) ---
 
-	// Déclenche Orders -> Payments en mTLS.
-	mux.HandleFunc("/api/order", instrument("/api/order", func(w http.ResponseWriter, r *http.Request) {
-		proxyJSON(w, orders, ordersURL+"/order", "POST")
-	}))
+	// Déclenche Orders -> Payments via le mesh.
+	mux.HandleFunc("/api/order", func(w http.ResponseWriter, r *http.Request) {
+		proxyJSON(w, client, ordersURL+"/order", "POST")
+	})
 
-	// Récupère le catalogue auprès de Catalog en mTLS.
-	mux.HandleFunc("/api/products", instrument("/api/products", func(w http.ResponseWriter, r *http.Request) {
-		proxyJSON(w, catalog, catalogURL+"/products", "GET")
-	}))
+	// Récupère le catalogue auprès de Catalog via le mesh.
+	mux.HandleFunc("/api/products", func(w http.ResponseWriter, r *http.Request) {
+		proxyJSON(w, client, catalogURL+"/products", "GET")
+	})
 
 	// Démonstration du refus : la Gateway tente d'appeler /pay de Payments,
-	// route réservée à Orders. Le handshake mTLS réussit (Gateway est dans le
-	// trust domain) mais la politique par route renvoie 403. C'est le cœur du
-	// zero-trust : être authentifié ne suffit pas, il faut être autorisé.
-	mux.HandleFunc("/api/forbidden", instrument("/api/forbidden", func(w http.ResponseWriter, r *http.Request) {
-		proxyJSON(w, payments, paymentsURL+"/pay", "POST")
-	}))
+	// route réservée à Orders. Le mesh authentifie la Gateway (mTLS OK) mais
+	// l'AuthorizationPolicy de Payments refuse l'appel : le proxy renvoie 403
+	// AVANT que la requête n'atteigne l'app. C'est le cœur du zero-trust : être
+	// authentifié ne suffit pas, il faut être autorisé — et c'est le mesh, pas
+	// le code applicatif, qui le décide.
+	mux.HandleFunc("/api/forbidden", func(w http.ResponseWriter, r *http.Request) {
+		proxyJSON(w, client, paymentsURL+"/pay", "POST")
+	})
 
-	// Envoie un événement à Analytics en mTLS (identité attendue : analytics).
-	mux.HandleFunc("/api/event", instrument("/api/event", func(w http.ResponseWriter, r *http.Request) {
-		proxyJSON(w, analytics, analyticsURL+"/event", "POST")
-	}))
+	// Envoie un événement à Analytics via le mesh.
+	mux.HandleFunc("/api/event", func(w http.ResponseWriter, r *http.Request) {
+		proxyJSON(w, client, analyticsURL+"/event", "POST")
+	})
 
-	// Agrège les journaux d'appels des services pour le front. La Gateway est
-	// la seule autorisée à lire /_calls sur chaque service.
-	mux.HandleFunc("/api/calls", instrument("/api/calls", func(w http.ResponseWriter, r *http.Request) {
+	// Agrège les journaux d'appels des services pour le front.
+	mux.HandleFunc("/api/calls", func(w http.ResponseWriter, r *http.Request) {
 		out := map[string]any{
-			"orders":   fetchJSON(orders, ordersURL+"/_calls"),
-			"catalog":  fetchJSON(catalog, catalogURL+"/_calls"),
-			"payments": fetchJSON(payments, paymentsURL+"/_calls"),
+			"orders":   fetchJSON(client, ordersURL+"/_calls"),
+			"catalog":  fetchJSON(client, catalogURL+"/_calls"),
+			"payments": fetchJSON(client, paymentsURL+"/_calls"),
 		}
 		writeJSON(w, http.StatusOK, out)
-	}))
+	})
 
 	// Mode démo : génère un trafic cohérent (commandes OK, catalogue,
 	// événements analytics, et le scénario de refus) pour peupler les
 	// journaux et les métriques. Retourne un résumé {scenarios, allowed, denied}.
-	mux.HandleFunc("/api/demo", instrument("/api/demo", func(w http.ResponseWriter, r *http.Request) {
-		runDemo(w, orders, catalog, payments, analytics,
-			ordersURL, catalogURL, paymentsURL, analyticsURL)
-	}))
+	mux.HandleFunc("/api/demo", func(w http.ResponseWriter, r *http.Request) {
+		runDemo(w, client, ordersURL, catalogURL, paymentsURL, analyticsURL)
+	})
 
 	// Le front statique (contenu du dossier static/, servi à la racine).
 	staticRoot, err := fs.Sub(staticFiles, "static")
@@ -103,31 +87,16 @@ func main() {
 	}
 	mux.Handle("/", http.FileServer(http.FS(staticRoot)))
 
-	log.Println("gateway: écoute en HTTP sur :8080 (front + API navigateur)")
-	// HTTP volontaire ici : c'est la seule surface côté navigateur. Le TLS
-	// public est terminé par l'ingress (Let's Encrypt) ; tout le trafic
-	// inter-services, lui, est en mTLS SPIFFE. Exception tracée et limitée
-	// à cette ligne plutôt que désactivée globalement.
-	log.Fatal(http.ListenAndServe(":8080", mux)) // nosemgrep: go.lang.security.audit.net.use-tls.use-tls
+	addr := getenv("LISTEN_ADDR", ":8080")
+	log.Printf("gateway: écoute en HTTP sur %s (front + API navigateur)", addr)
+	// HTTP côté navigateur : le TLS public est terminé par l'ingress. Le trafic
+	// inter-services est en mTLS via le mesh.
+	log.Fatal(http.ListenAndServe(addr, mux)) // nosemgrep: go.lang.security.audit.net.use-tls.use-tls
 }
 
-// mtlsClient construit un client HTTP mTLS qui n'accepte que le serveur
-// dont l'identité SPIFFE correspond à peerID.
-func mtlsClient(source *workloadapi.X509Source, peerID string) *http.Client {
-	id, err := spiffeid.FromString(peerID)
-	if err != nil {
-		log.Fatalf("gateway: SPIFFE ID pair invalide %q: %v", peerID, err)
-	}
-	cfg := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeID(id))
-	return &http.Client{
-		Transport: &http.Transport{TLSClientConfig: cfg},
-		Timeout:   5 * time.Second,
-	}
-}
-
-// proxyJSON appelle une URL en mTLS et recopie la réponse au navigateur. Le
-// statut HTTP est conservé : un 403 (refus de la politique par route) ou un
-// échec de handshake mTLS arrivent tels quels au front.
+// proxyJSON appelle une URL via le mesh et recopie la réponse au navigateur. Le
+// statut HTTP est conservé : un 403 (refus d'une AuthorizationPolicy, émis par
+// le proxy Linkerd) arrive tel quel au front.
 func proxyJSON(w http.ResponseWriter, client *http.Client, url, method string) {
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
@@ -136,7 +105,6 @@ func proxyJSON(w http.ResponseWriter, client *http.Client, url, method string) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		// Le handshake mTLS lui-même a échoué (identité non membre du domaine).
 		writeJSON(w, http.StatusOK, map[string]any{"allowed": false, "error": err.Error()})
 		return
 	}
@@ -161,26 +129,25 @@ func fetchJSON(client *http.Client, url string) any {
 // runDemo joue un scénario d'appels pour produire un trafic réaliste : des
 // commandes et consultations qui réussissent, des événements analytics, et le
 // scénario de refus (Gateway -> /pay, réservé à Orders). Compte les décisions.
-func runDemo(w http.ResponseWriter, orders, catalog, payments, analytics *http.Client,
+func runDemo(w http.ResponseWriter, client *http.Client,
 	ordersURL, catalogURL, paymentsURL, analyticsURL string) {
 	steps := []struct {
-		client *http.Client
 		url    string
 		method string
 	}{
-		{orders, ordersURL + "/order", "POST"},
-		{catalog, catalogURL + "/products", "GET"},
-		{analytics, analyticsURL + "/event", "POST"},
-		{orders, ordersURL + "/order", "POST"},
-		{catalog, catalogURL + "/products", "GET"},
-		{payments, paymentsURL + "/pay", "POST"}, // refus attendu (403)
-		{analytics, analyticsURL + "/event", "POST"},
-		{orders, ordersURL + "/order", "POST"},
+		{ordersURL + "/order", "POST"},
+		{catalogURL + "/products", "GET"},
+		{analyticsURL + "/event", "POST"},
+		{ordersURL + "/order", "POST"},
+		{catalogURL + "/products", "GET"},
+		{paymentsURL + "/pay", "POST"}, // refus attendu (403 émis par le mesh)
+		{analyticsURL + "/event", "POST"},
+		{ordersURL + "/order", "POST"},
 	}
 
 	allowed, denied := 0, 0
 	for _, s := range steps {
-		if callOK(s.client, s.url, s.method) {
+		if callOK(client, s.url, s.method) {
 			allowed++
 		} else {
 			denied++
@@ -191,7 +158,7 @@ func runDemo(w http.ResponseWriter, orders, catalog, payments, analytics *http.C
 	})
 }
 
-// callOK exécute un appel mTLS et renvoie true si le pair a répondu 2xx.
+// callOK exécute un appel via le mesh et renvoie true si le pair a répondu 2xx.
 func callOK(client *http.Client, url, method string) bool {
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {

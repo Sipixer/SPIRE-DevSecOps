@@ -1,41 +1,19 @@
-// Catalog affiche les produits. Il n'appelle personne. L'autorisation se fait
-// à deux niveaux : handshake mTLS (membre du trust domain) puis politique par
-// route, l'identité de l'appelant étant lue dans son certificat.
+// Catalog affiche les produits. Il n'appelle personne. En v2, le mTLS et
+// l'autorisation sont portés par le mesh (Linkerd) : l'app parle HTTP clair,
+// et la politique « qui peut appeler /products » est déclarée hors du code dans
+// des AuthorizationPolicy Linkerd (voir k8s/workloads/authz.yaml). Une requête
+// non autorisée est rejetée par le proxy avant d'atteindre ce code.
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
-	"slices"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
-	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
-	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
-
-const trustDomain = "example.org"
-
-const (
-	gatewayID = "spiffe://example.org/ns/shop/sa/gateway"
-)
-
-// policy : qui peut appeler quelle route.
-//
-//	/products : lister les produits — réservé à la Gateway.
-//	/_calls   : consulter le journal — réservé à la Gateway (pour le front).
-var policy = map[string][]string{
-	"/products": {gatewayID},
-	"/_calls":   {gatewayID},
-}
-
-// authzDisabled coupe la décision par route : l'identité reste lue et
-// journalisée (mTLS actif), mais tout appelant du trust domain est autorisé.
-var authzDisabled bool
 
 var products = []map[string]any{
 	{"id": 1, "name": "Clé USB chiffrée", "price": 29},
@@ -73,77 +51,45 @@ func (l *callLog) snapshot() []callEntry {
 }
 
 func main() {
-	ctx := context.Background()
-	socketPath := getenv("SPIFFE_ENDPOINT_SOCKET", "unix:///run/spire/sockets/spire-agent.sock")
-	authzDisabled = os.Getenv("AUTHZ_DISABLED") == "true"
-
-	source, err := workloadapi.NewX509Source(ctx,
-		workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
-	if err != nil {
-		log.Fatalf("catalog: impossible d'obtenir un SVID via le Workload API: %v", err)
-	}
-	defer source.Close()
-
-	svid, err := source.GetX509SVID()
-	if err != nil {
-		log.Fatalf("catalog: pas de SVID disponible: %v", err)
-	}
-	log.Printf("catalog: identité %s", svid.ID)
-
 	logbook := &callLog{}
 
-	go serveMetrics()
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("/products", guard("/products", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
+	mux.HandleFunc("/products", logged("/products", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
 		log.Printf("catalog: produits servis à %s", caller)
 		writeJSON(w, http.StatusOK, products)
 	}))
-	mux.HandleFunc("/_calls", guard("/_calls", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
+	mux.HandleFunc("/_calls", logged("/_calls", logbook, func(w http.ResponseWriter, r *http.Request, caller string) {
 		writeJSON(w, http.StatusOK, logbook.snapshot())
 	}))
 
-	td, _ := spiffeid.TrustDomainFromString(trustDomain)
-	tlsConfig := tlsconfig.MTLSServerConfig(source, source, tlsconfig.AuthorizeMemberOf(td))
-
-	server := &http.Server{Addr: ":8443", Handler: mux, TLSConfig: tlsConfig}
-	log.Println("catalog: écoute en mTLS sur :8443")
-	log.Fatal(server.ListenAndServeTLS("", ""))
+	addr := getenv("LISTEN_ADDR", ":8080")
+	log.Printf("catalog: écoute en HTTP sur %s (mTLS assuré par le mesh)", addr)
+	log.Fatal(http.ListenAndServe(addr, mux)) // nosemgrep: go.lang.security.audit.net.use-tls.use-tls
 }
 
-func guard(route string, logbook *callLog, h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+// logged journalise l'appel puis délègue. L'autorisation est déjà faite par le
+// proxy Linkerd en amont : toute requête qui arrive ici a été autorisée.
+func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := callerID(r)
-		allowed := authzDisabled || slices.Contains(policy[route], caller)
-		recordAuthz(allowed)
-		// /_calls est une route d'introspection (lecture du journal par le front) ;
-		// on ne la journalise pas pour ne pas noyer les vrais appels métier.
 		if route != "/_calls" {
-			logbook.record(callEntry{Caller: caller, Route: route, Allowed: allowed, Timestamp: time.Now()})
+			logbook.record(callEntry{Caller: caller, Route: route, Allowed: true, Timestamp: time.Now()})
 		}
-		if !allowed {
-			log.Printf("catalog: %s REFUSÉ sur %s", caller, route)
-			recordRequest(route, http.StatusForbidden)
-			writeJSON(w, http.StatusForbidden, map[string]any{
-				"allowed": false, "route": route, "caller": caller,
-				"reason": "identité non autorisée pour cette route",
-			})
-			return
-		}
-		recordRequest(route, http.StatusOK)
 		h(w, r, caller)
 	}
 }
 
+// callerID lit l'identité de l'appelant dans l'en-tête posé par le proxy Linkerd.
 func callerID(r *http.Request) string {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.PeerCertificates[0].URIs) == 0 {
+	id := r.Header.Get("l5d-client-id")
+	if id == "" {
 		return "(inconnu)"
 	}
-	id, err := spiffeid.FromURI(r.TLS.PeerCertificates[0].URIs[0])
-	if err != nil {
-		return "(invalide)"
+	parts := strings.Split(id, ".")
+	if len(parts) >= 2 {
+		return "spiffe://" + parts[1] + "/sa/" + parts[0]
 	}
-	return id.String()
+	return id
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

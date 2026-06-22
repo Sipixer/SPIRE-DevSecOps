@@ -1,0 +1,123 @@
+# Zero-trust déclaratif avec Istio. C'est l'équivalent v2 de la fonction guard()
+# qui était codée en dur dans chaque service Go (v1) : la politique sort du
+# binaire et entre dans Git, auditable et modifiable sans recompiler.
+#
+# Deux niveaux, comme en v1 :
+#   1. mTLS imposé partout (PeerAuthentication STRICT) — l'équivalent du
+#      handshake mTLS « membre du trust domain ».
+#   2. autorisation par route et par appelant (AuthorizationPolicy) — l'équivalent
+#      de la map `policy` + guard(). Le principe d'Istio : dès qu'une
+#      AuthorizationPolicy ALLOW cible un workload, tout ce qui n'est pas
+#      explicitement autorisé est REFUSÉ (403 émis par le sidecar, avant l'app).
+#
+# Les identités sont au format spiffe://cluster.local/ns/shop/sa/<service>,
+# dérivées du ServiceAccount de chaque pod.
+---
+# 1. mTLS STRICT sur tout le namespace : un appel non-mTLS est rejeté.
+#    C'est ce qui garantit que TOUT le trafic inter-services est chiffré et
+#    authentifié — l'équivalent du « tout le monde présente son SVID » de la v1.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: shop
+spec:
+  mtls:
+    mode: STRICT
+---
+# 1b. Exception pour la Gateway : elle reçoit le navigateur via l'ingress Traefik,
+#     qui n'est PAS dans le mesh (donc trafic non-mTLS légitime). On passe la
+#     Gateway en PERMISSIVE pour accepter cette entrée HTTP publique. Les appels
+#     SORTANTS de la Gateway vers les services restent en mTLS (imposé par le
+#     STRICT côté destination). C'est la seule surface non-mTLS, par conception.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: gateway-permissive
+  namespace: shop
+spec:
+  selector:
+    matchLabels: { app: gateway }
+  mtls:
+    mode: PERMISSIVE
+---
+# 2a. Payments : /pay réservé à Orders (c'est LE scénario de refus de la démo).
+#     La Gateway est authentifiée (mTLS OK) mais n'est PAS dans la liste des
+#     principals autorisés sur /pay -> le sidecar de Payments renvoie 403.
+#     /_calls (lecture du journal par le front) est réservé à la Gateway.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: payments-authz
+  namespace: shop
+spec:
+  selector:
+    matchLabels: { app: payments }
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/shop/sa/orders"]
+      to:
+        - operation:
+            paths: ["/pay"]
+    - from:
+        - source:
+            principals: ["cluster.local/ns/shop/sa/gateway"]
+      to:
+        - operation:
+            paths: ["/_calls"]
+---
+# 2b. Orders : /order et /_calls réservés à la Gateway.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: orders-authz
+  namespace: shop
+spec:
+  selector:
+    matchLabels: { app: orders }
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/shop/sa/gateway"]
+      to:
+        - operation:
+            paths: ["/order", "/_calls"]
+---
+# 2c. Catalog : /products et /_calls réservés à la Gateway.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: catalog-authz
+  namespace: shop
+spec:
+  selector:
+    matchLabels: { app: catalog }
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/shop/sa/gateway"]
+      to:
+        - operation:
+            paths: ["/products", "/_calls"]
+---
+# 2d. Analytics : /event réservé à la Gateway.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: analytics-authz
+  namespace: shop
+spec:
+  selector:
+    matchLabels: { app: analytics }
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/shop/sa/gateway"]
+      to:
+        - operation:
+            paths: ["/event"]

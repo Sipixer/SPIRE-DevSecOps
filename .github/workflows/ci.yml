@@ -85,8 +85,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
-          cache-dependency-path: services/${{ matrix.service }}/go.sum
+          go-version: "1.25"
+          # Plus de dépendances externes en v2 (le mTLS est porté par le mesh,
+          # plus de go-spiffe) : pas de go.sum, donc pas de cache de modules.
+          cache: false
       - name: go vet + build
         run: |
           cd services/${{ matrix.service }}

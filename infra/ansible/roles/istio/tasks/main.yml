@@ -1,0 +1,72 @@
+---
+# Installe Istio (mode sidecar) + Kiali via Helm. C'est le service mesh de la
+# v2 : il remplace le mTLS câblé à la main dans les services Go (v1) et la
+# sidecar Envoy maison d'analytics. Le mTLS, l'identité (SPIFFE dérivée du
+# ServiceAccount) et l'autorisation par route (AuthorizationPolicy) sont
+# désormais portés par le mesh, pas par le code applicatif.
+
+- name: Repo Helm Istio
+  ansible.builtin.command: helm repo add istio {{ istio_helm_repo }} --force-update
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+
+- name: Repo Helm Kiali
+  ansible.builtin.command: helm repo add kiali {{ kiali_helm_repo }} --force-update
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+
+- name: helm repo update
+  ansible.builtin.command: helm repo update istio kiali
+  changed_when: false
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+
+- name: Namespace istio-system
+  ansible.builtin.shell:
+    cmd: |
+      k3s kubectl apply -f - <<'EOF'
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: {{ istio_namespace }}
+      EOF
+  changed_when: true
+
+# Istio se compose de 3 charts : base (CRDs + ressources cluster), istiod (le
+# control plane qui injecte et configure les sidecars), et l'ingress n'est pas
+# requis ici (on garde l'ingress Traefik de k3s côté navigateur).
+- name: Istio base (CRDs)
+  ansible.builtin.command: >-
+    helm upgrade --install istio-base istio/base
+    --version {{ istio_chart_version }}
+    --namespace {{ istio_namespace }}
+    --set defaultRevision=default
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+  changed_when: true
+
+- name: Istiod (control plane)
+  ansible.builtin.command: >-
+    helm upgrade --install istiod istio/istiod
+    --version {{ istio_chart_version }}
+    --namespace {{ istio_namespace }}
+    --wait --timeout 5m
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+  changed_when: true
+
+# Kiali : le dashboard du mesh (topologie live, mTLS, refus d'autorisation).
+# Branché sur le Prometheus de la stack observability déjà déployée. La
+# télémétrie Istio standard alimente les graphes.
+- name: Values Kiali
+  ansible.builtin.template:
+    src: kiali-values.yaml.j2
+    dest: /tmp/kiali-values.yaml
+    mode: "0644"
+
+- name: Kiali (dashboard du mesh)
+  ansible.builtin.command: >-
+    helm upgrade --install kiali-server kiali/kiali-server
+    --version {{ kiali_chart_version }}
+    --namespace {{ istio_namespace }}
+    --values /tmp/kiali-values.yaml
+    --wait --timeout 5m
+  environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
+  changed_when: true
