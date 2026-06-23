@@ -25,29 +25,11 @@
   environment: { KUBECONFIG: /etc/rancher/k3s/k3s.yaml }
   changed_when: true
 
-- name: Rendre le dashboard Grafana
-  ansible.builtin.template:
-    src: dashboard-spire-zerotrust.json.j2
-    dest: /tmp/spire-zerotrust.json
-    mode: "0644"
-
-- name: ConfigMap du dashboard SPIRE / Zero-trust
-  ansible.builtin.shell:
-    cmd: |
-      k3s kubectl create configmap grafana-dashboard-spire \
-        --namespace {{ monitoring_namespace }} \
-        --from-file=spire-zerotrust.json=/tmp/spire-zerotrust.json \
-        --dry-run=client -o yaml | k3s kubectl apply -f -
-  changed_when: true
-
-- name: Label grafana_dashboard sur la ConfigMap
-  ansible.builtin.command: >-
-    k3s kubectl label configmap grafana-dashboard-spire
-    --namespace {{ monitoring_namespace }}
-    grafana_dashboard=1 --overwrite
-  changed_when: true
-
 # --- Dashboards Istio (v2) ---
+# Le dashboard custom « SPIRE / Zero-trust » de la v1 a été retiré : il
+# affichait les métriques maison (authz_decisions_total, http_requests_total,
+# spire_agent_*) qui n'existent plus en v2. Les dashboards Istio ci-dessous le
+# remplacent (et Kiali couvre la topologie / le zero-trust en live).
 # Les 6 dashboards officiels Istio (mesh, service, workload, control plane,
 # performance, wasm), publiés sur grafana.com. On les télécharge et on les
 # expose à Grafana via le sidecar dashboards (label grafana_dashboard), comme

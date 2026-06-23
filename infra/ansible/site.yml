@@ -57,11 +57,20 @@
       ansible.builtin.service:
         name: ssh
         state: restarted
+  # Ordre des rôles = chaîne de dépendances, important pour un déploiement
+  # reproductible from scratch :
+  #   1. k3s           : le cluster.
+  #   2. observability : Prometheus + Grafana. AVANT istio car Kiali se branche
+  #      sur ce Prometheus au démarrage (sinon il boote sans source de métriques).
+  #   3. istio         : le service mesh (CRDs + istiod + Kiali). AVANT argocd
+  #      car la boutique déployée par ArgoCD a besoin des CRDs Istio
+  #      (PeerAuthentication/AuthorizationPolicy) et de l'injection de sidecars.
+  #   4. argocd        : déploie la boutique (shop) en GitOps depuis deploy/prod.
+  #
+  # v2 : Istio remplace SPIRE. Le rôle spire/ est conservé dans le dépôt pour la
+  # démo d'évolution (v1) mais n'est plus joué.
   roles:
     - { role: k3s, tags: [k3s] }
-    # v2 : Istio (service mesh) remplace SPIRE. Le mTLS, l'identité et
-    # l'autorisation sont portés par le mesh ; le rôle spire/ est conservé dans
-    # le dépôt pour la démo d'évolution (v1) mais n'est plus joué.
+    - { role: observability, tags: [observability] }
     - { role: istio, tags: [istio] }
     - { role: argocd, tags: [argocd] }
-    - { role: observability, tags: [observability] }

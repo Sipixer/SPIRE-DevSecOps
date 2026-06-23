@@ -69,6 +69,12 @@ variable "shop_hostname" {
   default     = "shop.sylvainrougie.fr"
 }
 
+variable "kiali_hostname" {
+  description = "Sous-domaine exposant le dashboard Kiali (mesh Istio) via le tunnel (protégé par Access)"
+  type        = string
+  default     = "kiali.sylvainrougie.fr"
+}
+
 variable "access_allowed_email" {
   description = "Email autorisé à passer Cloudflare Access pour atteindre ArgoCD"
   type        = string

@@ -3,6 +3,17 @@
 # Le durcissement (sshd, fail2ban, unattended-upgrades) est appliqué directement
 # dans site.yml ; pas de variable dédiée nécessaire ici.
 
+# --- SPIRE (v1, NON JOUÉ) ---
+# Le rôle spire/ n'est plus dans site.yml (remplacé par Istio en v2). On garde
+# ces variables pour que le rôle reste cohérent et rejouable à la demande
+# (ansible-playbook ... --tags spire) dans le cadre de la démo d'évolution.
+spire_trust_domain: "example.org"
+spire_cluster_name: "spire"
+spire_namespace: "spire"
+spire_chart_version: "0.29.0"
+spire_crds_chart_version: "0.5.0"
+spire_helm_repo: "https://spiffe.github.io/helm-charts-hardened/"
+
 # --- Istio (service mesh, v2) ---
 # Remplace SPIRE : le mTLS, l'identité et l'autorisation sont désormais portés
 # par le mesh. La v1 (SPIRE + mTLS câblé à la main) reste consultable sur le
@@ -19,11 +30,11 @@ kiali_helm_repo: "https://kiali.org/helm-charts"
 # observability via le sidecar dashboards de Grafana. id = ID grafana.com,
 # rev = révision compatible Istio 1.24.
 istio_grafana_dashboards:
-  - { name: "mesh", id: 7639, rev: 192 }
-  - { name: "service", id: 7636, rev: 192 }
-  - { name: "workload", id: 7630, rev: 192 }
-  - { name: "control-plane", id: 7645, rev: 192 }
-  - { name: "performance", id: 11829, rev: 192 }
+  - { name: "mesh", id: 7639, rev: 311 }
+  - { name: "service", id: 7636, rev: 310 }
+  - { name: "workload", id: 7630, rev: 311 }
+  - { name: "control-plane", id: 7645, rev: 310 }
+  - { name: "performance", id: 11829, rev: 310 }
 
 # --- ArgoCD ---
 argocd_namespace: "argocd"
@@ -48,6 +59,12 @@ prometheus_helm_repo: "https://prometheus-community.github.io/helm-charts"
 grafana_host: "grafana.localhost"
 grafana_admin_user: "admin"
 grafana_admin_password: "admin"
+
+# Hostnames publics exposés via le Cloudflare Tunnel (doivent correspondre aux
+# défauts Terraform dans infra/terraform/variables.tf). Utilisés par les values
+# Kiali (web_fqdn + lien Grafana) pour fonctionner derrière le tunnel.
+grafana_hostname: "grafana.sylvainrougie.fr"
+kiali_hostname: "kiali.sylvainrougie.fr"
 # v2 : les métriques applicatives (RPS, latence, codes, mTLS) sont produites par
 # les sidecars Istio et scrappées via les annotations Prometheus standard du
 # mesh — plus de port /metrics maison (9100) ni de liste de services à scraper.

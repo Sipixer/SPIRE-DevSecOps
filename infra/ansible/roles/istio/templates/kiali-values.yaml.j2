@@ -1,12 +1,22 @@
-# Kiali : dashboard du mesh Istio. Lecture seule, branché sur le Prometheus de
-# la stack observability (kube-prometheus-stack) déjà déployée — pas de
-# Prometheus dédié à monter. L'accès se fait via port-forward / tunnel (pas
-# d'exposition publique : zero-trust réseau conservé, cf. accès Grafana/ArgoCD).
+# Kiali : dashboard du mesh Istio. Branché sur le Prometheus/Grafana de la stack
+# observability (kube-prometheus-stack) déjà déployée — pas de Prometheus dédié.
+# Exposé via le Cloudflare Tunnel (kiali.sylvainrougie.fr, protégé par Access) :
+# aucun port entrant, zero-trust réseau conservé (cf. Grafana/ArgoCD).
 auth:
+  # L'authentification est assurée EN AMONT par Cloudflare Access (login OTP).
+  # Kiali lui-même est en anonymous : la porte est devant, dans Cloudflare.
   strategy: anonymous
 
 deployment:
   view_only_mode: false
+
+server:
+  # Kiali rejette par défaut tout Host autre que localhost (anti-DNS-rebinding).
+  # Derrière le tunnel, les requêtes arrivent avec Host=kiali.sylvainrougie.fr :
+  # on déclare ce FQDN comme web_fqdn et on désactive l'enforced-host, sinon
+  # Kiali renvoie une erreur 4xx pour ce hostname.
+  web_fqdn: "{{ kiali_hostname }}"
+  web_schema: "https"
 
 external_services:
   istio:
@@ -19,3 +29,4 @@ external_services:
   grafana:
     enabled: true
     internal_url: "http://kube-prometheus-stack-grafana.{{ monitoring_namespace }}.svc.cluster.local"
+    external_url: "https://{{ grafana_hostname }}"

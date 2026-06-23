@@ -1,11 +1,12 @@
 # Accès aux UI via un seul Cloudflare Tunnel (zero-trust, aucun port entrant).
 #
-# Un pod cloudflared (connexion SORTANTE) route 3 hostnames vers 3 services
+# Un pod cloudflared (connexion SORTANTE) route 4 hostnames vers 4 services
 # internes du cluster. Cloudflare Access met un login DEVANT les services
-# sensibles (ArgoCD, Grafana) ; la boutique de démo (Gateway) reste publique.
+# sensibles (ArgoCD, Grafana, Kiali) ; la boutique de démo (Gateway) reste publique.
 #
 #   argocd.sylvainrougie.fr  → Access(login) → argocd-server   (admin cluster)
 #   grafana.sylvainrougie.fr → Access(login) → grafana          (observabilité)
+#   kiali.sylvainrougie.fr   → Access(login) → kiali            (dashboard mesh Istio)
 #   shop.sylvainrougie.fr    → (public)       → gateway          (démo boutique)
 
 # --- Le tunnel (remote-managed) ---
@@ -38,6 +39,10 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
       {
         hostname = var.shop_hostname
         service  = "http://gateway.shop.svc.cluster.local:8080"
+      },
+      {
+        hostname = var.kiali_hostname
+        service  = "http://kiali.istio-system.svc.cluster.local:20001"
       },
       {
         service = "http_status:404"
@@ -84,6 +89,15 @@ resource "cloudflare_dns_record" "shop" {
   proxied = true
 }
 
+resource "cloudflare_dns_record" "kiali" {
+  zone_id = data.cloudflare_zone.main.zone_id
+  name    = var.kiali_hostname
+  content = local.tunnel_cname
+  type    = "CNAME"
+  ttl     = 1
+  proxied = true
+}
+
 # --- Cloudflare Access : login obligatoire devant ArgoCD et Grafana ---
 # La boutique (shop) n'a PAS d'application Access => publique.
 resource "cloudflare_zero_trust_access_application" "argocd" {
@@ -102,6 +116,18 @@ resource "cloudflare_zero_trust_access_application" "grafana" {
   account_id       = var.cloudflare_account_id
   name             = "Grafana (SPIRE DevSecOps)"
   domain           = var.grafana_hostname
+  type             = "self_hosted"
+  session_duration = "24h"
+  policies = [{
+    id         = cloudflare_zero_trust_access_policy.allow_admin.id
+    precedence = 1
+  }]
+}
+
+resource "cloudflare_zero_trust_access_application" "kiali" {
+  account_id       = var.cloudflare_account_id
+  name             = "Kiali (SPIRE DevSecOps)"
+  domain           = var.kiali_hostname
   type             = "self_hosted"
   session_duration = "24h"
   policies = [{
@@ -134,6 +160,10 @@ output "grafana_url" {
 
 output "shop_url" {
   value = "https://${var.shop_hostname}"
+}
+
+output "kiali_url" {
+  value = "https://${var.kiali_hostname}"
 }
 
 output "cloudflared_tunnel_token" {

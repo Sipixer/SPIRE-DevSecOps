@@ -1,6 +1,6 @@
 # Provisionne et configure la plateforme : Terraform (serveur Hetzner) puis
-# Ansible (k3s, SPIRE, ArgoCD, observabilité). Déclenché à la main — créer ou
-# détruire un serveur n'est pas lié à un push de code.
+# Ansible (k3s, observabilité, Istio + Kiali, ArgoCD). Déclenché à la main —
+# créer ou détruire un serveur n'est pas lié à un push de code.
 #
 # Accès SSH JUSTE-À-TEMPS (zero-trust) : le port 22 est FERMÉ par défaut sur le
 # firewall Hetzner. Pour configurer le serveur, ce workflow l'ouvre uniquement
@@ -85,7 +85,7 @@ jobs:
           ssh-keygen -y -f key >/dev/null && echo "Clé SSH valide" || {
             echo "::error::Clé SSH invalide — vérifier le secret SSH_PRIVATE_KEY"; exit 1; }
 
-      - name: Ansible (k3s + SPIRE + ArgoCD + observabilité)
+      - name: Ansible (k3s + observabilité + Istio/Kiali + ArgoCD)
         if: inputs.action == 'apply'
         working-directory: infra
         env:

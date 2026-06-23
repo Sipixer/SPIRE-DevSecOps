@@ -35,39 +35,13 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     storageSpec: {}
     additionalScrapeConfigs:
-      - job_name: shop-services
-        kubernetes_sd_configs:
-          - role: endpoints
-            namespaces:
-              names: [{{ shop_namespace }}]
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_endpoint_port_name]
-            action: keep
-            regex: metrics
-          - source_labels: [__meta_kubernetes_service_name]
-            target_label: service
-          - source_labels: [__meta_kubernetes_namespace]
-            target_label: namespace
-          - source_labels: [__meta_kubernetes_pod_name]
-            target_label: pod
-      # Le chart spiffe/spire expose la télémétrie sur un containerPort "prom"
-      # (9988) mais n'ouvre aucun Service : on scrape les pods directement.
-      - job_name: spire-telemetry
-        kubernetes_sd_configs:
-          - role: pod
-            namespaces:
-              names: [{{ spire_namespace }}]
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_container_port_name]
-            action: keep
-            regex: prom
-          - source_labels: [__meta_kubernetes_namespace]
-            target_label: namespace
-          - source_labels: [__meta_kubernetes_pod_name]
-            target_label: pod
-          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
-            target_label: service
-      - job_name: annotated-pods
+      # --- Métriques Istio (v2) ---
+      # Les sidecars Envoy d'Istio exposent leurs métriques fusionnées (Envoy +
+      # application) sur le port 15020, path /stats/prometheus. C'est ce job qui
+      # alimente Kiali et les dashboards Grafana Istio. Sans lui, ils sont vides.
+      # Istio annote les pods meshés avec prometheus.io/{scrape,port,path} ; on
+      # s'appuie dessus, ce qui couvre automatiquement tout pod injecté.
+      - job_name: istio-proxies
         kubernetes_sd_configs:
           - role: pod
         relabel_configs:
@@ -83,6 +57,24 @@ prometheus:
             regex: ([^:]+)(?::\d+)?;(\d+)
             replacement: $1:$2
             target_label: __address__
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+      # --- Control plane Istio (istiod) ---
+      # istiod expose ses propres métriques (pilot_*, etc.) sur le port 15014 ;
+      # elles alimentent le dashboard « Istio Control Plane ».
+      - job_name: istiod
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [{{ istio_namespace }}]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: http-monitoring
           - source_labels: [__meta_kubernetes_namespace]
             target_label: namespace
           - source_labels: [__meta_kubernetes_pod_name]
