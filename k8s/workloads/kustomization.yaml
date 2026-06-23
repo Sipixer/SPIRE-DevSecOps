@@ -5,6 +5,7 @@ resources:
   - shop.yaml
   - analytics.yaml
   - authz.yaml
+  - loadgen.yaml
 
 # Sur deploy/prod, le CD remplace ces tags par le SHA du commit (images immuables).
 images:

@@ -73,13 +73,6 @@ func main() {
 		writeJSON(w, http.StatusOK, out)
 	})
 
-	// Mode démo : génère un trafic cohérent (commandes OK, catalogue,
-	// événements analytics, et le scénario de refus) pour peupler les
-	// journaux et les métriques. Retourne un résumé {scenarios, allowed, denied}.
-	mux.HandleFunc("/api/demo", func(w http.ResponseWriter, r *http.Request) {
-		runDemo(w, client, ordersURL, catalogURL, paymentsURL, analyticsURL)
-	})
-
 	// Le front statique (contenu du dossier static/, servi à la racine).
 	staticRoot, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -124,53 +117,6 @@ func fetchJSON(client *http.Client, url string) any {
 	var v any
 	json.NewDecoder(resp.Body).Decode(&v)
 	return v
-}
-
-// runDemo joue un scénario d'appels pour produire un trafic réaliste : des
-// commandes et consultations qui réussissent, des événements analytics, et le
-// scénario de refus (Gateway -> /pay, réservé à Orders). Compte les décisions.
-func runDemo(w http.ResponseWriter, client *http.Client,
-	ordersURL, catalogURL, paymentsURL, analyticsURL string) {
-	steps := []struct {
-		url    string
-		method string
-	}{
-		{ordersURL + "/order", "POST"},
-		{catalogURL + "/products", "GET"},
-		{analyticsURL + "/event", "POST"},
-		{ordersURL + "/order", "POST"},
-		{catalogURL + "/products", "GET"},
-		{paymentsURL + "/pay", "POST"}, // refus attendu (403 émis par le mesh)
-		{analyticsURL + "/event", "POST"},
-		{ordersURL + "/order", "POST"},
-	}
-
-	allowed, denied := 0, 0
-	for _, s := range steps {
-		if callOK(client, s.url, s.method) {
-			allowed++
-		} else {
-			denied++
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]int{
-		"scenarios": len(steps), "allowed": allowed, "denied": denied,
-	})
-}
-
-// callOK exécute un appel via le mesh et renvoie true si le pair a répondu 2xx.
-func callOK(client *http.Client, url, method string) bool {
-	req, err := http.NewRequest(method, url, nil)
-	if err != nil {
-		return false
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode < 300
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
