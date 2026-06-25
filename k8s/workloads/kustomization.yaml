@@ -2,20 +2,25 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - shop.yaml
-  - analytics.yaml
-  - authz.yaml
-  - loadgen.yaml
+- shop.yaml
+- analytics.yaml
+- authz.yaml
+- loadgen.yaml
 
 # Sur deploy/prod, le CD remplace ces tags par le SHA du commit (images immuables).
 images:
-  - name: ghcr.io/sipixer/spire-devsecops/gateway
-    newTag: latest
-  - name: ghcr.io/sipixer/spire-devsecops/orders
-    newTag: latest
-  - name: ghcr.io/sipixer/spire-devsecops/catalog
-    newTag: latest
-  - name: ghcr.io/sipixer/spire-devsecops/payments
-    newTag: latest
-  - name: ghcr.io/sipixer/spire-devsecops/analytics
-    newTag: latest
+- name: ghcr.io/sipixer/spire-devsecops/analytics
+  newName: ghcr.io/sipixer/spire-devsecops/analytics
+  newTag: 5ca529a913f90f2452bfbe9183a00a1487159a31
+- name: ghcr.io/sipixer/spire-devsecops/catalog
+  newName: ghcr.io/sipixer/spire-devsecops/catalog
+  newTag: 5ca529a913f90f2452bfbe9183a00a1487159a31
+- name: ghcr.io/sipixer/spire-devsecops/gateway
+  newName: ghcr.io/sipixer/spire-devsecops/gateway
+  newTag: 5ca529a913f90f2452bfbe9183a00a1487159a31
+- name: ghcr.io/sipixer/spire-devsecops/orders
+  newName: ghcr.io/sipixer/spire-devsecops/orders
+  newTag: 5ca529a913f90f2452bfbe9183a00a1487159a31
+- name: ghcr.io/sipixer/spire-devsecops/payments
+  newName: ghcr.io/sipixer/spire-devsecops/payments
+  newTag: 5ca529a913f90f2452bfbe9183a00a1487159a31
