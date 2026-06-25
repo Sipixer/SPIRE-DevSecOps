@@ -198,7 +198,7 @@ Les actes qui suivent zooment sur le plan deux. Gardez cette carte : on y revien
 ---
 layout: default
 title: Acte 1 — Identité
-clicks: 4
+clicks: 1
 ---
 
 <Slide :chapter="0" kicker="Acte 1 · Identité" title="Donner une identité à chaque service"
@@ -206,6 +206,7 @@ clicks: 4
 
 <div style="height: 330px">
   <FlowDiagram
+    auto
     :vb="[1000, 360]"
     :nodes="[
       { id:'spire', label:'SPIRE', x:40,  y:140, w:150, variant:'accent', at:0 },
@@ -221,7 +222,7 @@ clicks: 4
   />
 </div>
 
-<div v-click="4" class="flex items-center gap-3 justify-center mt-6">
+<div v-click="1" class="flex items-center gap-3 justify-center mt-6">
   <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg" style="background:var(--ok)">✓</div>
   <span class="pill text-base" style="background:var(--ok-lt); color:var(--ok); padding:.3em 1em">Payments sait, de façon prouvée, que c'est Orders</span>
 </div>
@@ -312,35 +313,39 @@ NetworkPolicy prouve d'où vient un paquet ; le mTLS prouve qui l'a signé.
 ---
 layout: default
 title: Acte 1 — Mécanisme
-clicks: 5
+clicks: 1
 ---
 
 <Slide :chapter="0" kicker="Acte 1 · Mécanisme" title="Comment ça marche, concrètement" accent="ink">
 
 <div class="grid grid-cols-4 gap-6">
-  <div v-click="1" class="card text-center h-52 flex flex-col justify-center">
+  <div v-motion :initial="{ opacity: 0, y: 24 }" :enter="{ opacity: 1, y: 0, transition: { delay: 100, duration: 400 } }"
+       class="card text-center h-52 flex flex-col justify-center">
     <div class="text-5xl font-extrabold t-ink mb-3">①</div>
     <div class="font-bold text-lg">SPIRE émet</div>
     <div class="t-slate text-sm mt-2">un X.509-SVID</div>
   </div>
-  <div v-click="2" class="card text-center h-52 flex flex-col justify-center">
+  <div v-motion :initial="{ opacity: 0, y: 24 }" :enter="{ opacity: 1, y: 0, transition: { delay: 350, duration: 400 } }"
+       class="card text-center h-52 flex flex-col justify-center">
     <div class="text-5xl font-extrabold t-ink mb-3">②</div>
     <div class="font-bold text-lg">Handshake mTLS</div>
     <div class="t-slate text-sm mt-2">les deux pairs s'authentifient</div>
   </div>
-  <div v-click="3" class="card card-top text-center h-52 flex flex-col justify-center">
+  <div v-motion :initial="{ opacity: 0, y: 24 }" :enter="{ opacity: 1, y: 0, transition: { delay: 600, duration: 400 } }"
+       class="card card-top text-center h-52 flex flex-col justify-center">
     <div class="text-5xl font-extrabold t-claude mb-3">③</div>
     <div class="font-bold text-lg">Identité lue</div>
     <div class="t-slate text-sm mt-2">dans le certificat</div>
   </div>
-  <div v-click="4" class="card card-top text-center h-52 flex flex-col justify-center">
+  <div v-motion :initial="{ opacity: 0, y: 24 }" :enter="{ opacity: 1, y: 0, transition: { delay: 850, duration: 400 } }"
+       class="card card-top text-center h-52 flex flex-col justify-center">
     <div class="text-5xl font-extrabold t-claude mb-3">④</div>
     <div class="font-bold text-lg">Décision</div>
     <div class="t-slate text-sm mt-2">policy par route</div>
   </div>
 </div>
 
-<div v-click="5" class="text-center text-2xl mt-12">
+<div v-click="1" class="text-center text-2xl mt-12">
   L'identité est <b class="t-claude-dk">prouvée pendant le handshake</b>, jamais déclarée dans un header.
 </div>
 
@@ -499,7 +504,7 @@ toute la logique SPIFFE/mTLS dans chaque langage ? Ça ne tient pas. C'est le pr
 ---
 layout: default
 title: Acte 2 — Envoy
-clicks: 4
+clicks: 1
 ---
 
 <Slide :chapter="1" kicker="Acte 2 · Multi-langage" title="Déléguer le mTLS à un proxy"
@@ -507,6 +512,7 @@ clicks: 4
 
 <div style="height: 340px">
   <FlowDiagram
+    auto
     :vb="[1000, 460]"
     :nodes="[
       { id:'gw',    label:'Gateway · Go', sub:'mTLS dans le code', x:40,  y:120, w:210, h:90, at:0 },
@@ -522,7 +528,7 @@ clicks: 4
   />
 </div>
 
-<div v-click="4" class="flex items-center gap-3 justify-center mt-2">
+<div v-click="1" class="flex items-center gap-3 justify-center mt-2">
   <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg" style="background:var(--ok)">✓</div>
   <span class="pill text-base" style="background:var(--ok-lt); color:var(--ok); padding:.3em 1em">ça marche aussi</span>
 </div>
@@ -601,7 +607,7 @@ C'est exactement ce qu'est un service mesh.
 ---
 layout: default
 title: Acte 3 — Mesh
-clicks: 5
+clicks: 1
 ---
 
 <Slide :chapter="2" kicker="Acte 3 · Échelle" title="Le service mesh fait tout, partout"
@@ -609,25 +615,26 @@ clicks: 5
 
 <div style="height: 400px">
   <FlowDiagram
+    auto
     :vb="[1000, 520]"
     :nodes="[
       { id:'gw',  label:'Gateway',  sub:'+ proxy', x:400, y:30,  w:180, h:84, at:0 },
       { id:'ord', label:'Orders',   sub:'+ proxy', x:110, y:220, w:180, h:84, at:1 },
       { id:'cat', label:'Catalog',  sub:'+ proxy', x:400, y:220, w:180, h:84, at:1 },
       { id:'an',  label:'Analytics',sub:'+ proxy', x:690, y:220, w:180, h:84, at:1 },
-      { id:'pay', label:'Payments', sub:'+ proxy', x:400, y:415, w:180, h:84, at:1 },
+      { id:'pay', label:'Payments', sub:'+ proxy', x:400, y:415, w:180, h:84, at:2 },
     ]"
     :edges="[
-      { from:'gw', to:'ord', label:'mTLS auto', variant:'ok', at:2, curve:true },
-      { from:'gw', to:'cat', label:'mTLS auto', variant:'ok', at:2 },
-      { from:'gw', to:'an',  label:'mTLS auto', variant:'ok', at:2, curve:true },
-      { from:'ord', to:'pay', variant:'ok', at:3, curve:true },
-      { from:'gw', to:'pay', label:'/pay : 403', variant:'danger', dashed:true, at:4, curve:true },
+      { from:'gw', to:'ord', label:'mTLS auto', variant:'ok', at:3, curve:true },
+      { from:'gw', to:'cat', label:'mTLS auto', variant:'ok', at:3 },
+      { from:'gw', to:'an',  label:'mTLS auto', variant:'ok', at:3, curve:true },
+      { from:'ord', to:'pay', variant:'ok', at:4, curve:true },
+      { from:'gw', to:'pay', label:'/pay : 403', variant:'danger', dashed:true, at:5, curve:true },
     ]"
   />
 </div>
 
-<div v-click="5" class="text-center text-xl mt-2">
+<div v-click="1" class="text-center text-xl mt-2">
   Un seul mécanisme, <b class="t-ok">identique pour Go et Node</b> — et le 403 zero-trust, en config.
 </div>
 

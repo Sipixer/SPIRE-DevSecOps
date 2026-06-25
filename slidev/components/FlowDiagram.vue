@@ -9,8 +9,10 @@
     edges : [{ from, to, label?, variant?, at?, dashed?, curve? }]
             variant : 'default' | 'ok' | 'danger' | 'soft'
     vb    : [largeur, hauteur] du viewBox (def [1000, 560])
+    auto  : si vrai, le schéma se construit tout seul à l'arrivée sur la slide
+            (cascade en stagger basée sur l'ordre des `at:`), sans consommer de clic.
 
-  Le composant lit $clicks (injecté par Slidev) pour révéler progressivement.
+  Sans `auto`, le composant lit $clicks (injecté par Slidev) pour révéler progressivement.
 -->
 <template>
   <svg :viewBox="`0 0 ${vbW} ${vbH}`" :width="vbW" :height="vbH"
@@ -26,12 +28,13 @@
     <!-- arêtes -->
     <g>
       <g v-for="(e, i) in resolvedEdges" :key="'e'+i"
-         class="edge" :class="{ shown: clicks >= (e.at ?? 0) }">
+         class="edge" :class="{ shown: isShown(e.at) }"
+         :style="auto ? { 'transition-delay': delayFor(e.at) } : null">
         <path :d="e.d" fill="none"
               :stroke="e.color" :stroke-width="e.width"
               :marker-end="`url(#${e.marker})`"
               :class="['edge-path', e.dashed ? 'is-dashed' : 'is-solid']"
-              :style="{ '--len': e.len }" />
+              :style="{ '--len': e.len, ...(auto ? { 'animation-delay': delayFor(e.at) } : {}) }" />
         <g v-if="e.label">
           <rect :x="e.lx - e.lw/2" :y="e.ly - 15" :width="e.lw" height="26" rx="6"
                 fill="#FBEDE7" />
@@ -44,7 +47,8 @@
     <!-- nœuds -->
     <g>
       <g v-for="n in resolvedNodes" :key="n.id"
-         class="node" :class="{ shown: clicks >= (n.at ?? 0) }">
+         class="node" :class="{ shown: isShown(n.at) }"
+         :style="auto ? { 'transition-delay': delayFor(n.at) } : null">
         <rect :x="n.x" :y="n.y" :width="n.w" :height="n.h" :rx="n.rx"
               :fill="n.fill" :stroke="n.stroke" :stroke-width="n.sw" />
         <text :x="n.x + n.w/2" :y="n.sub ? n.y + n.h/2 - 7 : n.y + n.h/2 + 6"
@@ -64,10 +68,23 @@ const props = defineProps({
   nodes: { type: Array, required: true },
   edges: { type: Array, default: () => [] },
   vb: { type: Array, default: () => [1000, 560] },
+  // cascade automatique à l'arrivée sur la slide, sans consommer de clic
+  auto: { type: Boolean, default: false },
+  // délai (ms) entre deux paliers `at:` successifs en mode auto
+  step: { type: Number, default: 300 },
 })
 
 const { $clicks } = useSlideContext()
 const clicks = computed(() => $clicks?.value ?? 0)
+
+// en mode auto : tout est révélé d'emblée, le décalage vient du transition-delay.
+// sinon : on respecte le seuil de clic `at:`.
+function isShown(at) {
+  return props.auto ? true : clicks.value >= (at ?? 0)
+}
+function delayFor(at) {
+  return `${(at ?? 0) * props.step}ms`
+}
 
 const vbW = computed(() => props.vb[0])
 const vbH = computed(() => props.vb[1])

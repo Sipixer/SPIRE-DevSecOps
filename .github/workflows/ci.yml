@@ -140,14 +140,29 @@ jobs:
           ignore-unfixed: true
           exit-code: ${{ matrix.service == 'analytics' && '0' || '1' }}
 
-      - name: Push vers GHCR (sha + latest)
-        uses: docker/build-push-action@v6
-        with:
-          context: services/${{ matrix.service }}
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest
+      # L'image est déjà construite et chargée localement (étape build, load: true).
+      # On la pousse avec un retry : GHCR renvoie sporadiquement "unknown blob"
+      # lors de l'upload des couches — une flakiness réseau côté registre, pas une
+      # erreur de notre build. Sans retry, ça casse le push (et donc la CD) au
+      # hasard. 3 tentatives espacées de 10s absorbent ces aléas.
+      - name: Push vers GHCR (sha + latest, avec retry)
+        env:
+          IMG: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker tag "${IMG}:${SHA}" "${IMG}:latest"
+          for tag in "${SHA}" latest; do
+            n=0
+            until docker push "${IMG}:${tag}"; do
+              n=$((n+1))
+              if [ "$n" -ge 3 ]; then
+                echo "::error::Push de ${IMG}:${tag} échoué après 3 tentatives"
+                exit 1
+              fi
+              echo "Push ${IMG}:${tag} échoué (tentative $n) — nouvelle tentative dans 10s"
+              sleep 10
+            done
+          done
 
       - name: Cosign (signature keyless)
         uses: sigstore/cosign-installer@v3
