@@ -1,8 +1,4 @@
-// Analytics : app Node.js. En v2, le mTLS est porté par le sidecar Istio
-// (injecté automatiquement) — plus d'Envoy maison à configurer. L'app écoute
-// en clair sur :8080 ; seul le sidecar l'atteint. L'identité de l'appelant est
-// transmise par Istio via l'en-tête X-Forwarded-Client-Cert (XFCC), champ
-// URI=spiffe://... — non falsifiable, posé après vérification du mTLS.
+// Analytics : compteur d'événements (mTLS et identité de l'appelant portés par le sidecar Istio).
 "use strict";
 
 const http = require("http");
@@ -13,7 +9,6 @@ const PORT = Number(process.env.LISTEN_PORT || 8080);
 let eventsTotal = 0;
 const eventsByCaller = new Map();
 
-// Istio pose le XFCC standard (champ URI=spiffe://cluster.local/ns/<ns>/sa/<sa>).
 function callerFromHeaders(headers) {
   const xfcc = headers["x-forwarded-client-cert"];
   if (xfcc) {

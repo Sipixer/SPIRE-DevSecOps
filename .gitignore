@@ -21,3 +21,9 @@ services/gateway/gateway
 node_modules/
 services/analytics/analytics
 .claude/
+
+# macOS
+.DS_Store
+
+# Slidev : build régénérable (le PDF exporté est versionné comme livrable)
+slidev/dist/

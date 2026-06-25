@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 3 — SPIRE : comment l'identité est délivrée (attestation)</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 1 · Identité — Leçon 3 / ~18</p>
+<h1>SPIRE : comment l'identité est <em>délivrée</em></h1>
+<p class="subtitle">La leçon 2 disait : « le service demande son SVID à un socket, sans
+secret ». La vraie question, c'est : <strong>comment SPIRE sait-il que c'est vraiment
+Orders qui demande, et pas un imposteur ?</strong> Réponse : l'attestation.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  SPIRE ne distribue pas d'identités à l'aveugle. Avant d'émettre un SVID, il
+  <strong>vérifie en deux temps</strong> : « <em>sur quel nœud</em> tournes-tu ? » (node
+  attestation), puis « <em>quel processus</em> es-tu ? » (workload attestation). C'est ce
+  qui résout le problème impossible : <strong>donner une identité à quelque chose qui n'en
+  a aucune, sans lui pré-injecter un secret</strong>.</p>
+</div>
+
+<h2>1. SPIFFE est la norme, SPIRE est l'implémentation</h2>
+
+<p>Distinction que le jury adore : <a href="../reference/glossaire.html#spiffe">SPIFFE</a>
+est <em>la spec</em> (leçon 2) ; <a href="../reference/glossaire.html#spire">SPIRE</a>
+(<em>SPIFFE Runtime Environment</em>) est <em>le logiciel</em> qui la réalise. Deux composants :</p>
+
+<ul>
+  <li><strong>SPIRE Server</strong> — l'autorité de certification. Il détient la clé racine
+    du <a href="../reference/glossaire.html#trust-domain">trust domain</a> et signe les SVID.</li>
+  <li><strong>SPIRE Agent</strong> — un par nœud (DaemonSet). Il expose la
+    <a href="../reference/glossaire.html#workload-api">Workload API</a> (le socket local)
+    et fait le travail d'attestation des workloads.</li>
+</ul>
+
+<p>Dans ta v1, tout ça s'installe en une commande Helm (rôle Ansible <code>spire</code>) :</p>
+
+<pre><code># infra/ansible/roles/spire/templates/spire-values.yaml.j2
+global:
+  spire:
+    trustDomain: "{{ spire_trust_domain }}"   # → example.org
+    clusterName: "{{ spire_cluster_name }}"
+# + helm install spiffe/spire  → déploie Server + Agent (DaemonSet)</code></pre>
+
+<h2>2. Le problème impossible : « secret zéro »</h2>
+
+<p>Voici le casse-tête. Pour qu'un service <em>prouve</em> son identité, il lui faut un
+secret (sa clé privée). Mais comment lui livrer ce premier secret <strong>de façon
+sûre</strong>, alors qu'il n'a encore… aucune identité pour s'authentifier ? Si on code
+un mot de passe en dur pour ça, on retombe sur le problème du token de la leçon 2 (il fuit).</p>
+
+<p>C'est le problème du « <strong>secret zéro</strong> » (la SPIFFE l'appelle joliment
+« the bottom turtle » — la tortue du fond). L'attestation est la réponse :
+<strong>on ne livre pas un secret, on <em>vérifie des faits</em></strong> que seul le vrai
+workload peut présenter (son token de ServiceAccount projeté, son emplacement réel sur un
+nœud du cluster). Le fait d'être un processus attestable <em>est</em> la preuve.</p>
+
+<h2>3. L'attestation en deux phases</h2>
+
+<div class="note">
+  <span class="label">spiffe.io — verbatim</span>
+  « SPIRE performs attestation in two phases: first <strong>node attestation</strong> (in
+  which the identity of the node the workload is running on is verified) and then
+  <strong>workload attestation</strong> (in which the workload on the node is verified). »
+</div>
+
+<h3>Phase 1 — Node attestation : « sur quel nœud es-tu ? »</h3>
+
+<p>L'Agent SPIRE doit d'abord prouver <em>de quel nœud</em> il s'agit. Sur Kubernetes, le
+plugin <code>k8s_psat</code> (<em>Projected Service Account Token</em>) fait ça : l'Agent
+présente un token de ServiceAccount projeté ; le Server le valide via l'API
+<strong>TokenReview</strong> de Kubernetes — qui confirme au passage le nœud, le namespace,
+etc. Personne n'a injecté de secret : le token projeté est monté par Kubernetes lui-même.</p>
+
+<h3>Phase 2 — Workload attestation : « quel processus es-tu ? »</h3>
+
+<div class="note">
+  <span class="label">spiffe.io — verbatim</span>
+  L'Agent « interrogates the node's kernel to identify the <strong>process ID</strong> of
+  the caller », puis des plugins « discover additional information about the workload,
+  querying neighboring platform-specific components – such as a Kubernetes
+  <strong>kubelet</strong> », et renvoient le tout « in the form of <strong>selectors</strong>. »
+</div>
+
+<p>Concrètement : quand ton pod <code>orders</code> appelle le socket, l'Agent regarde
+<em>quel PID</em> l'appelle, demande au kubelet « ce processus, c'est quel pod ? », et
+obtient des <strong>selectors</strong> : namespace=<code>shop</code>,
+ServiceAccount=<code>orders</code>, labels… <strong>Le workload ne se déclare pas ; il est
+observé.</strong> Impossible de mentir : un imposteur ne peut pas faire croire au kubelet
+qu'il est le pod <code>orders</code>.</p>
+
+<h2>4. La règle : selectors → SPIFFE ID</h2>
+
+<p>Reste à dire « ce jeu de selectors mérite <em>tel</em> SPIFFE ID ». C'est une
+<strong>registration entry</strong>. Le chart Helm que tu utilises en crée une par défaut,
+via un CRD <code>ClusterSPIFFEID</code>, avec ce gabarit :</p>
+
+<pre><code>spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}</code></pre>
+
+<p>Applique-le à ton pod <code>orders</code> (trust domain <code>example.org</code>,
+namespace <code>shop</code>, SA <code>orders</code>) :</p>
+
+<pre><code>spiffe://example.org/ns/shop/sa/orders</code></pre>
+
+<div class="key">
+  <span class="label">Le déclic</span>
+  C'est <strong>exactement</strong> la constante <code>ordersID</code> de ta leçon 2. Tu
+  comprends maintenant <em>d'où elle sort</em> : ce n'est pas toi qui l'as inventée, c'est
+  l'attestation qui la <em>dérive</em> du ServiceAccount Kubernetes, automatiquement. Le
+  ServiceAccount est l'ancre entre « ce que k8s sait » et « l'identité SPIFFE ».
+</div>
+
+<h2>5. Courte durée de vie = rotation automatique</h2>
+
+<p>Un SVID expire vite (TTL X.509 par défaut : <strong>1 heure</strong>) et SPIRE le
+renouvelle tout seul.</p>
+
+<div class="note">
+  <span class="label">spiffe.io — verbatim</span>
+  « all private keys (and corresponding certificates) are <strong>short lived, rotated
+  frequently and automatically</strong>. »
+</div>
+
+<p>Pourquoi c'est un argument fort : un certificat volé n'est exploitable qu'une heure, et
+il n'y a <em>aucune</em> rotation manuelle de secret à gérer. Compare au token statique de
+la leçon 2 qui, lui, reste valable indéfiniment.</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Vous dites qu'aucun secret n'est pré-injecté. Mais pour vérifier le premier
+  token, il faut bien une confiance de départ quelque part ? Ce n'est pas un peu de la
+  triche ? »</p>
+  <p><strong>Réponse :</strong> non, et c'est subtil. La confiance de départ ne vient pas
+  d'un secret <em>applicatif</em> qu'on aurait copié dans Orders ; elle vient de
+  l'<strong>infrastructure que l'on contrôle déjà</strong> : Kubernetes lui-même (l'API
+  TokenReview, le kubelet) sert de témoin de confiance. SPIRE délègue la racine de confiance
+  à la plateforme, au lieu de créer un Nième secret partagé. C'est le déplacement clé :
+  on ne distribue pas des secrets, on <strong>vérifie des faits</strong> que seule la vraie
+  plateforme peut attester. <em>(Le terme « bottom turtle » vient du livre SPIFFE
+  « Solving the Bottom Turtle ».)</em></p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="2">
+  <div class="q">Dans quel ordre, et que vérifie chacune des deux phases d'attestation ?</div>
+  <button>D'abord le workload (quel processus), puis le nœud (sur quelle machine il tourne).</button>
+  <button>Une seule phase : le Server lit directement le ServiceAccount du pod via l'API.</button>
+  <button>D'abord le nœud (node attestation), puis le workload (quel processus appelle).</button>
+  <button>D'abord la clé privée du pod, puis sa signature comparée au bundle racine.</button>
+  <div class="explain">Node attestation EN PREMIER (l'Agent prouve sur quel nœud il est, via
+  <code>k8s_psat</code> + TokenReview), PUIS workload attestation (l'Agent observe quel PID
+  appelle et demande au kubelet de quel pod/SA il s'agit → selectors). Deux phases, dans cet
+  ordre.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <div class="q">D'où vient exactement le SPIFFE ID <code>spiffe://example.org/ns/shop/sa/orders</code> ?</div>
+  <button>Tu l'as écrit à la main dans une registration entry, un par service, manuellement.</button>
+  <button>Dérivé du ServiceAccount du pod par le gabarit par défaut du ClusterSPIFFEID.</button>
+  <button>Généré aléatoirement par le SPIRE Server à chaque émission d'un nouveau SVID.</button>
+  <button>Extrait de l'adresse IP du pod convertie en URI au format SPIFFE standard.</button>
+  <div class="explain">Le chart Helm déploie un <code>ClusterSPIFFEID</code> par défaut dont
+  le gabarit est <code>spiffe://&lt;trustDomain&gt;/ns/&lt;namespace&gt;/sa/&lt;serviceAccount&gt;</code>.
+  Pour le pod orders (ns shop, SA orders, td example.org) ça donne exactement cet ID.
+  L'attestation le DÉRIVE du ServiceAccount — automatiquement, pas à la main.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire à lire (12 min)</span>
+    <strong>spiffe.io — « SPIRE Concepts »</strong> : node attestation, workload attestation,
+    selectors et registration entries expliqués par le projet lui-même.
+    <a href="https://spiffe.io/docs/latest/spire-about/spire-concepts/">spiffe.io/docs/latest/spire-about/spire-concepts/</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0002-spiffe-svid-identite-de-workload.html">Leçon 2 — SPIFFE &amp; SVID</a></span>
+    <span><strong>Suivant :</strong> <a href="0004-mtls-le-handshake.html">Leçon 4 — mTLS : le handshake qui transporte et vérifie l'identité</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux voir le détail du plugin
+  <code>k8s_psat</code>, comprendre TokenReview, ou que je te grille « mode jury » sur
+  l'attestation ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+/* teach.css — feuille de style partagée du cours SPIRE/DevSecOps.
+   Inspiration Tufte : typographie lisible, marges généreuses, sobre, imprimable.
+   Tous les fichiers leçons + références la lient. Une seule source de vérité visuelle. */
+
+:root {
+  --ink: #1a1a1a;
+  --paper: #fdfcf8;
+  --muted: #6b6b6b;
+  --rule: #d8d4c8;
+  --accent: #7a1f1f;        /* rouge sobre — refus/zero-trust, lien fil rouge */
+  --accent-soft: #f3e7e3;
+  --ok: #1f5e3a;            /* vert — autorisé */
+  --ok-soft: #e4f0e8;
+  --code-bg: #f4f2ec;
+  --note-bg: #f0ede3;
+  --jury-bg: #fbf3e2;
+  --jury-border: #c9a227;
+  --maxw: 46rem;
+}
+
+* { box-sizing: border-box; }
+
+html { font-size: 18px; }
+
+body {
+  margin: 0 auto;
+  max-width: var(--maxw);
+  padding: 4rem 1.6rem 6rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- En-tête de leçon --- */
+.kicker {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 0.4rem;
+}
+h1 {
+  font-weight: 700;
+  font-size: 2.1rem;
+  line-height: 1.12;
+  margin: 0 0 0.6rem;
+  letter-spacing: -0.01em;
+}
+.subtitle {
+  font-size: 1.12rem;
+  color: var(--muted);
+  font-style: italic;
+  margin: 0 0 2.2rem;
+}
+
+h2 {
+  font-weight: 700;
+  font-size: 1.4rem;
+  margin: 2.6rem 0 0.7rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--rule);
+  letter-spacing: -0.01em;
+}
+h3 {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 650;
+  font-size: 1.02rem;
+  margin: 1.6rem 0 0.4rem;
+}
+
+p { margin: 0.7rem 0; }
+strong { font-weight: 650; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+a:hover { border-bottom-color: var(--accent); }
+
+ul, ol { padding-left: 1.3rem; }
+li { margin: 0.35rem 0; }
+
+code {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  background: var(--code-bg);
+  padding: 0.12em 0.38em;
+  border-radius: 4px;
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+
+/* --- Encarts --- */
+.note, .jury, .key, .warn {
+  margin: 1.4rem 0;
+  padding: 1rem 1.2rem;
+  border-radius: 6px;
+  font-size: 0.96rem;
+}
+.note { background: var(--note-bg); border-left: 4px solid var(--muted); }
+.key  { background: var(--accent-soft); border-left: 4px solid var(--accent); }
+.warn { background: var(--jury-bg); border-left: 4px solid var(--accent); }
+
+/* Encart « question de jury » — la signature pédagogique de ce cours */
+.jury {
+  background: var(--jury-bg);
+  border: 1px solid var(--jury-border);
+  border-left: 5px solid var(--jury-border);
+}
+.jury .label {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #8a6d11;
+  display: block;
+  margin-bottom: 0.3rem;
+}
+.jury .q { font-weight: 650; font-style: italic; }
+
+.note .label, .key .label, .warn .label {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  font-weight: 700;
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--muted);
+}
+.key .label { color: var(--accent); }
+
+/* --- Tableaux comparatifs (vs concurrents) --- */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.4rem 0;
+  font-size: 0.9rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+thead th {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: 2px solid var(--ink);
+}
+tbody tr:hover { background: rgba(0,0,0,0.02); }
+td.ok { color: var(--ok); font-weight: 600; }
+td.no { color: var(--accent); font-weight: 600; }
+
+/* --- Marqueurs allowed/denied (fil rouge zero-trust) --- */
+.tag { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.78rem; font-weight: 700; padding: 0.1em 0.5em; border-radius: 999px; white-space: nowrap; }
+.tag.allow { background: var(--ok-soft); color: var(--ok); }
+.tag.deny  { background: var(--accent-soft); color: var(--accent); }
+
+/* --- Quiz interactif (composant réutilisable, voir assets/quiz.js) --- */
+.quiz { margin: 1.6rem 0; padding: 1.2rem 1.3rem; background: #fff; border: 1px solid var(--rule); border-radius: 8px; }
+.quiz .q { font-weight: 650; margin-bottom: 0.8rem; }
+.quiz button {
+  display: block; width: 100%; text-align: left;
+  font-family: inherit; font-size: 0.94rem;
+  margin: 0.4rem 0; padding: 0.6rem 0.85rem;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 6px;
+  cursor: pointer; transition: background 0.12s, border-color 0.12s;
+}
+.quiz button:hover { border-color: var(--muted); }
+.quiz button.correct { background: var(--ok-soft); border-color: var(--ok); }
+.quiz button.wrong { background: var(--accent-soft); border-color: var(--accent); }
+.quiz .explain { margin-top: 0.8rem; font-size: 0.9rem; color: var(--ink); display: none; }
+.quiz .explain.show { display: block; }
+.quiz .explain.show::before { content: "→ "; color: var(--accent); font-weight: 700; }
+
+/* --- Pied de leçon : source primaire, navigation, rappel prof --- */
+footer { margin-top: 3.5rem; padding-top: 1.4rem; border-top: 2px solid var(--ink); font-size: 0.9rem; }
+footer .primary { background: var(--ok-soft); border-radius: 6px; padding: 0.9rem 1.1rem; margin-bottom: 1.2rem; }
+footer .primary .label { font-family: ui-sans-serif, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.68rem; font-weight: 700; color: var(--ok); display: block; margin-bottom: 0.3rem; }
+footer nav { display: flex; justify-content: space-between; gap: 1rem; margin: 1rem 0; }
+footer .ask { color: var(--muted); font-style: italic; font-size: 0.86rem; }
+
+/* --- Impression --- */
+@media print {
+  html { font-size: 12pt; }
+  body { max-width: none; padding: 0; background: #fff; }
+  .quiz button { break-inside: avoid; }
+  .note, .jury, .key, .warn, pre, table { break-inside: avoid; }
+  footer nav, .quiz button { cursor: auto; }
+  a { border-bottom: none; color: var(--ink); }
+}

@@ -1,0 +1,208 @@
+/* Thème clair & corporate — SPIRE Zero-Trust */
+:root {
+  --ink: #1C2333;
+  --ink-soft: #3A4457;
+  --slate: #5B6678;
+  --mist: #8A93A3;
+  --line: #D7DDE6;
+  --cloud: #EEF1F6;
+  --paper: #F7F9FC;
+  --claude: #D97757;
+  --claude-dk: #B75A3D;
+  --claude-lt: #FBEDE7;
+  --ok: #2E7D5B;
+  --ok-lt: #E7F1EC;
+  --danger: #C0392B;
+  --danger-lt: #FBE9E7;
+  --gold: #C88A2C;
+}
+
+/* Slidev injecte ces variables de thème */
+:root {
+  --slidev-theme-primary: var(--claude);
+}
+
+.slidev-layout {
+  font-family: 'Inter', 'Calibri', system-ui, sans-serif;
+  color: var(--ink);
+}
+
+.slidev-layout h1 {
+  color: var(--ink);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.slidev-layout h2 { color: var(--ink); font-weight: 700; }
+
+/* fond par défaut clair */
+.slidev-layout {
+  background: #ffffff;
+}
+
+/* utilitaires couleur texte */
+.t-claude { color: var(--claude); }
+.t-claude-dk { color: var(--claude-dk); }
+.t-ink { color: var(--ink); }
+.t-slate { color: var(--slate); }
+.t-mist { color: var(--mist); }
+.t-ok { color: var(--ok); }
+.t-danger { color: var(--danger); }
+.t-white { color: #fff; }
+
+/* kicker (sur-titre) */
+.kicker {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--claude);
+}
+
+/* barre d'accent verticale devant les titres */
+.accent-title {
+  position: relative;
+  padding-left: 0.65rem;
+}
+.accent-title::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0.1em; bottom: 0.1em;
+  width: 5px; border-radius: 3px;
+  background: var(--claude);
+}
+
+/* carte */
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px -12px rgba(28,35,51,.18);
+  padding: 1.1rem 1.2rem;
+}
+.card-top { border-top: 4px solid var(--claude); }
+
+/* pill */
+.pill {
+  display: inline-flex; align-items: center;
+  padding: 0.18em 0.7em;
+  border-radius: 999px;
+  font-size: 0.8rem; font-weight: 700;
+  background: var(--claude-lt); color: var(--claude-dk);
+}
+
+/* slides sombres (titre, transitions, merci) */
+.dark-slide {
+  background: var(--ink) !important;
+  color: #fff;
+}
+.dark-slide h1, .dark-slide h2 { color: #fff; }
+
+/* bande latérale accent sur slides sombres */
+.side-accent::before {
+  content: '';
+  position: fixed;
+  left: 0; top: 0; bottom: 0;
+  width: 10px; background: var(--claude);
+  z-index: 10;
+}
+
+/* code blocks : police plus grande + respiration (magic-move inclus) */
+.slidev-layout .shiki,
+.slidev-code,
+.shiki-magic-move-container,
+.slidev-code-wrapper pre {
+  border-radius: 12px;
+  font-size: 1.35rem !important;
+  line-height: 1.75 !important;
+}
+.slidev-code-wrapper, .slidev-code {
+  padding: 1.3rem 1.5rem;
+}
+
+/* code inline sur fond sombre (cartes ink) : pas de fond clair qui masque le texte */
+.card[style*="--ink"] code,
+.card[style*="background:var(--ink)"] code,
+.dark-card code {
+  background: rgba(255,255,255,.12) !important;
+  color: #fff !important;
+  padding: 0 .3em;
+  border-radius: 4px;
+}
+
+/* code inline standard (fond clair) */
+.slidev-layout :not(pre) > code {
+  background: var(--cloud);
+  color: var(--claude-dk);
+  padding: .05em .35em;
+  border-radius: 5px;
+  font-size: .92em;
+}
+
+/* listes à puces propres (marqueur terracotta) */
+.bullets { list-style: none !important; padding: 0; margin: 0; }
+.bullets li {
+  list-style: none !important;
+  position: relative;
+  padding-left: 1.3rem;
+}
+.bullets li::marker { content: ''; }
+.bullets li::before {
+  content: '';
+  position: absolute;
+  left: 0; top: .55em;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--claude);
+}
+
+/* tableau comparatif NetworkPolicy / Cilium / mTLS */
+.np-table {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px -14px rgba(28,35,51,.18);
+}
+.np-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.7fr 2fr 1.4fr 1.9fr;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.95rem 1.4rem;
+  border-top: 1px solid var(--line);
+  font-size: 1.02rem;
+}
+.np-row > div { line-height: 1.25; }
+.np-head {
+  background: var(--ink);
+  color: #fff;
+  border-top: none;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.np-head > div { color: #fff; }
+.np-hot { background: var(--ok-lt); }
+.np-tag {
+  display: inline-block;
+  padding: 0.2em 0.7em;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+/* footer */
+.deck-footer {
+  position: absolute;
+  bottom: 18px; left: 40px; right: 40px;
+  display: flex; justify-content: space-between;
+  font-size: 0.72rem; color: var(--mist);
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+/* Fix Slidev (dev) : la liste d'autocomplétion du dialogue "Go to" reste
+   parfois affichée/débordée même quand le dialogue est rangé (-top-20).
+   On la masque tant que le dialogue n'est pas réellement ouvert (top:0). */
+#slidev-goto-dialog.-top-20 { opacity: 0; pointer-events: none; }
+#slidev-goto-dialog.-top-20 .autocomplete-list { display: none; }

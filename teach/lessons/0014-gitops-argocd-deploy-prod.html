@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 14 — GitOps & ArgoCD : la branche deploy/prod</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Transverse · Pipeline — Leçon 14 / ~18</p>
+<h1>GitOps &amp; ArgoCD : Git comme source de vérité</h1>
+<p class="subtitle">L'image est construite, scannée, signée. Comment arrive-t-elle dans le
+cluster ? Pas par un <code>kubectl apply</code> depuis la CI — mais par un agent qui
+<em>tire</em> l'état désiré depuis Git. C'est le GitOps.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  En <a href="../reference/glossaire.html#gitops">GitOps</a>, <strong>Git est la source de
+  vérité</strong> de ce qui tourne. Un agent dans le cluster (<a href="../reference/glossaire.html#argocd">ArgoCD</a>)
+  <em>tire</em> cet état désiré et réconcilie en continu. La CI ne déploie pas — elle écrit
+  dans Git, et ArgoCD se charge du reste. Avantage majeur : <strong>les accès au cluster ne
+  sortent jamais du cluster</strong>.</p>
+</div>
+
+<h2>1. Les 4 principes du GitOps (OpenGitOps / CNCF)</h2>
+<table>
+  <thead><tr><th>Principe</th><th>Chez toi</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Déclaratif</strong></td><td>l'état du cluster = des manifestes YAML (<code>k8s/workloads</code>)</td></tr>
+    <tr><td><strong>Versionné &amp; immuable</strong></td><td>tout est dans Git, historique complet, images épinglées au SHA</td></tr>
+    <tr><td><strong>Tiré automatiquement</strong></td><td>ArgoCD <em>pull</em> l'état depuis la branche <code>deploy/prod</code></td></tr>
+    <tr><td><strong>Réconcilié en continu</strong></td><td>ArgoCD compare réel vs désiré et corrige (selfHeal)</td></tr>
+  </tbody>
+</table>
+
+<h2>2. Ta mécanique de bout en bout</h2>
+<p>Rappelle le flux (leçon de la pipeline) — deux branches, deux rôles :</p>
+<pre><code>main           → le CODE SOURCE (ce que tu écris)
+deploy/prod    → l'ÉTAT DÉPLOYÉ (images épinglées au SHA, écrit par la CI)
+
+merge sur main → CI (scan, sign, push GHCR) → CI écrit deploy/prod → ArgoCD pull → cluster</code></pre>
+<p>Et la définition ArgoCD réelle de ton projet (rôle Ansible <code>argocd</code>) :</p>
+<pre><code>kind: Application
+spec:
+  source:
+    repoURL: https://github.com/Sipixer/SPIRE-DevSecOps.git
+    targetRevision: deploy/prod        # ← surveille CETTE branche
+    path: k8s/workloads
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }</code></pre>
+
+<h2>3. <code>selfHeal</code> et <code>prune</code> — ce qu'ils font vraiment</h2>
+<ul>
+  <li><strong>selfHeal</strong> : si quelqu'un modifie le cluster à la main (<em>drift</em>),
+    ArgoCD <strong>annule</strong> le changement et restaure l'état de Git. Git gagne toujours.</li>
+  <li><strong>prune</strong> : si une ressource est <em>retirée</em> de Git, ArgoCD la
+    <strong>supprime</strong> du cluster. Sans prune, les ressources « fantômes » resteraient.</li>
+</ul>
+<div class="note">
+  <span class="label">argo-cd docs — verbatim</span>
+  « By default, changes that are made to the live cluster will not trigger automated sync »
+  (selfHeal inverse ça) · « automated sync will not delete resources… is no longer defined in
+  Git » (prune inverse ça).
+</div>
+<div class="warn">
+  <span class="label">⚠ Conséquence pour ta démo (à connaître)</span>
+  Avec <code>selfHeal: true</code>, <strong>tout changement manuel dans le cluster est défait
+  automatiquement</strong>. C'est pour ça que ta démo ne fait <em>pas</em> de bascule v1↔v2
+  live à la main : ArgoCD la rejouerait. La démo montre plutôt le diff Git + Kiali live. Le
+  comprendre = expliquer une vraie décision d'architecture.
+</div>
+
+<h2>4. Pull vs push — l'argument de sécurité</h2>
+<p>Pourquoi ArgoCD <em>tire</em> (pull) plutôt que la CI ne <em>pousse</em> (push) ?</p>
+<table>
+  <thead><tr><th></th><th>Push (CI fait kubectl)</th><th>Pull (ArgoCD, ton choix)</th></tr></thead>
+  <tbody>
+    <tr><td>Qui a les accès cluster ?</td><td class="no">La CI (hors du cluster)</td><td class="ok">L'agent, dans le cluster</td></tr>
+    <tr><td>Credentials exposés ?</td><td class="no">Oui (un runner compromis = prod compromise)</td><td class="ok">Non, jamais hors du cluster</td></tr>
+    <tr><td>Rollback</td><td>script de redéploiement</td><td class="ok"><code>git revert</code></td></tr>
+  </tbody>
+</table>
+<div class="note">
+  <span class="label">gitops.tech — verbatim</span>
+  Le pull « prevents the god-mode… where credentials for doing deployments are known by the
+  CI/CD pipeline ». <span style="color:var(--muted);font-size:0.86rem;">→ Les clés du cluster
+  ne sortent jamais : la CI n'a pas besoin de <code>kubectl</code>.</span>
+</div>
+
+<h2>5. Pourquoi une branche <code>deploy/prod</code> avec SHA, pas <code>latest</code></h2>
+<p>La CI épingle chaque image à son <code>@sha</code> de commit, pas à <code>latest</code>.
+Pourquoi ? Le tag <code>latest</code> est <em>mouvant</em> : il peut être réécrit (y compris
+par un attaquant) et tu ne sais plus quelle version tourne.</p>
+<div class="note">
+  <span class="label">Doc Kubernetes — verbatim</span>
+  « You should avoid using the <code>:latest</code> tag… harder to track which version is
+  running and more difficult to roll back. » · épingler au digest fait qu'« a change at the
+  registry cannot lead to that mix of versions ».
+</div>
+<p>Donc : <strong>immuabilité</strong> (le SHA est figé), <strong>auditabilité</strong> (chaque
+déploiement = un commit), <strong>rollback = <code>git revert</code></strong> (déterministe).</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Pourquoi ne pas simplement faire un <code>kubectl apply</code> depuis votre CI
+  GitHub Actions ? Ce serait plus simple. »</p>
+  <p><strong>Réponse :</strong> pour la sécurité et la traçabilité. En push, ma CI devrait
+  détenir des <em>credentials d'admin du cluster</em> — un runner GitHub compromis donnerait
+  alors le contrôle total de la prod. En GitOps pull, c'est ArgoCD, <em>dans</em> le cluster,
+  qui tire l'état désiré : aucune clé du cluster ne sort jamais, la CI n'a même pas accès à
+  l'API Kubernetes. En plus, Git devient la source de vérité unique : chaque déploiement est
+  un commit auditable, et un rollback est un simple <code>git revert</code> vers un état connu
+  — pas un script fragile. C'est l'application du zero-trust à la livraison : on ne fait pas
+  confiance à la CI pour parler directement au cluster.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+<div class="quiz" data-answer="2">
+  <div class="q">Pourquoi le modèle « pull » d'ArgoCD est-il plus sûr que « push » depuis la CI ?</div>
+  <button>Parce que le pull est plus rapide et réduit la fenêtre d'attaque pendant le déploiement.</button>
+  <button>Parce que le pull chiffre les manifestes alors que le push les transmet en clair.</button>
+  <button>Parce que les credentials du cluster ne sortent jamais : la CI n'a pas accès à l'API k8s.</button>
+  <button>Parce que le pull vérifie la signature Cosign alors que le push l'ignore totalement.</button>
+  <div class="explain">En push, la CI détient des accès admin au cluster (un runner compromis =
+  prod compromise). En pull, ArgoCD tire l'état depuis le cluster : les credentials ne sortent
+  jamais. « Prevents the god-mode where credentials are known by the CI/CD pipeline. »</div>
+</div>
+<div class="quiz" data-answer="1">
+  <div class="q">Que fait <code>selfHeal: true</code> si tu modifies le cluster à la main ?</div>
+  <button>Il enregistre ta modification dans Git pour la conserver dans l'historique du dépôt.</button>
+  <button>Il annule ta modification et restaure l'état décrit dans la branche deploy/prod.</button>
+  <button>Il met l'application en pause jusqu'à ce qu'un humain valide le changement manuel.</button>
+  <button>Il duplique la ressource modifiée pour garder l'ancienne et la nouvelle version.</button>
+  <div class="explain">selfHeal fait gagner Git : tout changement manuel (drift) est défait et
+  l'état de Git est restauré. C'est exactement pourquoi la démo n'édite rien à la main dans le
+  cluster — ArgoCD le rejouerait.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (10 min)</span>
+    <strong>OpenGitOps (les 4 principes)</strong> + <strong>ArgoCD auto-sync</strong>.
+    <a href="https://opengitops.dev/">opengitops.dev</a> ·
+    <a href="https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/">argo-cd.readthedocs.io/…/auto_sync</a>
+  </div>
+  <nav>
+    <span>← <a href="0013-cosign-signature-slsa.html">Leçon 13 — Cosign &amp; SLSA</a></span>
+    <span><strong>Infra :</strong> <a href="0015-terraform-vs-ansible.html">Leçon 15 — Terraform vs Ansible : qui fait quoi</a> →</span>
+  </nav>
+  <p class="ask">Ton enseignant, c'est l'agent. Une question sur la réconciliation ou le rollback ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 17 — SSH juste-à-temps : le firewall dynamique</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Transverse · Infra — Leçon 17 / ~18</p>
+<h1>SSH juste-à-temps : le zero-trust appliqué au réseau</h1>
+<p class="subtitle">Le zero-trust de l'Acte 1 portait sur les <em>services</em>. Ici, le même
+principe s'applique à l'<em>accès admin</em> : le port 22 n'est jamais ouvert « au cas où »,
+seulement quand un job en a besoin, puis refermé.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Le port SSH (22) est <strong>fermé par défaut</strong> sur le firewall. La CI l'ouvre
+  <em>uniquement pour l'IP du runner</em>, le temps d'Ansible, puis le <strong>referme
+  systématiquement</strong> — même si Ansible échoue (<code>if: always()</code>). SSH devient
+  un accès <em>break-glass</em> juste-à-temps, jamais une porte ouverte en permanence.</p>
+</div>
+
+<h2>1. Le firewall dynamique, dans ton Terraform</h2>
+<p>La règle SSH n'existe que <em>si</em> une IP est fournie. Au repos, aucune règle 22 :</p>
+<pre><code># infra/terraform/main.tf
+dynamic "rule" {
+  for_each = var.allowed_ssh_cidr == "" ? [] : [var.allowed_ssh_cidr]
+  content { direction = "in"; protocol = "tcp"; port = "22"; source_ips = [rule.value] }
+}</code></pre>
+<p>Au repos <code>allowed_ssh_cidr = ""</code> → la boucle est vide → <strong>aucune règle
+22</strong> → port fermé. Un scan Internet sur le port 22 ne trouve rien.</p>
+
+<h2>2. La chorégraphie juste-à-temps (ton workflow infra)</h2>
+<pre><code>1. apply           : serveur créé, port 22 FERMÉ
+2. ouvre SSH (JIT) : terraform apply -var allowed_ssh_cidr=&lt;IP_runner&gt;/32
+3. Ansible         : se connecte, configure le serveur
+4. referme SSH     : terraform apply -var allowed_ssh_cidr=""   ← if: always()</code></pre>
+<div class="note">
+  <span class="label">Le détail qui fait la solidité — <code>if: always()</code></span>
+  L'étape 4 s'exécute <strong>quoi qu'il arrive</strong>, même si Ansible a planté à l'étape 3.
+  Sans ça, un échec laisserait le port 22 ouvert. C'est cette garantie qui rend le « juste-à-
+  temps » fiable : on ne <em>compte pas</em> sur le succès pour refermer.
+</div>
+
+<h2>3. SSH = break-glass, pas administration courante</h2>
+<p>Point de discours essentiel : <strong>l'administration normale ne passe pas par SSH</strong>.
+Elle passe par GitOps (ArgoCD) et <code>kubectl</code>. SSH est un canal de <em>secours</em>
+(« briser la vitre en cas d'urgence ») pour le provisioning et le debug profond — pas un
+accès quotidien.</p>
+<table>
+  <thead><tr><th>Besoin</th><th>Canal</th></tr></thead>
+  <tbody>
+    <tr><td>Déployer / changer l'app</td><td class="ok">GitOps (commit → ArgoCD)</td></tr>
+    <tr><td>Inspecter le cluster</td><td class="ok">kubectl</td></tr>
+    <tr><td>Monter / réparer le serveur</td><td>SSH break-glass (JIT, par la CI)</td></tr>
+  </tbody>
+</table>
+
+<h2>4. La défense en profondeur autour de SSH</h2>
+<p>Même fermé la plupart du temps, SSH est durci (ceinture + bretelles) — c'est ton rôle
+Ansible <code>hardening</code> :</p>
+<ul>
+  <li><strong>sshd durci</strong> : mot de passe désactivé, root par clé uniquement
+    (<code>PermitRootLogin prohibit-password</code>), <code>MaxAuthTries 3</code>.</li>
+  <li><strong>fail2ban</strong> : bannit les IP qui tentent du brute-force.</li>
+  <li><strong>unattended-upgrades</strong> : patchs de sécurité OS automatiques (la plupart
+    des compromissions exploitent des CVE déjà corrigées).</li>
+</ul>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Ouvrir et fermer le port SSH à chaque déploiement, n'est-ce pas une
+  complication inutile ? Un bon mot de passe et fail2ban ne suffiraient-ils pas ? »</p>
+  <p><strong>Réponse :</strong> c'est de la réduction de surface d'attaque, le même principe
+  zero-trust que pour mes services. Un port 22 ouvert en permanence est scanné en continu par
+  des bots ; même durci, c'est une cible permanente. En le gardant fermé par défaut et en ne
+  l'ouvrant que pour l'IP du runner, le temps d'un job, un scan Internet ne trouve <em>rien</em>
+  au repos — il n'y a pas de cible. Et la fermeture est garantie par un <code>if: always()</code>,
+  donc même un échec d'Ansible ne laisse pas la porte ouverte. fail2ban et le durcissement
+  sshd restent là en défense en profondeur, mais ils protègent une porte qui, idéalement,
+  n'est même pas visible. SSH n'est pas mon canal d'admin — c'est ArgoCD et kubectl ; SSH est
+  un break-glass juste-à-temps.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+<div class="quiz" data-answer="1">
+  <div class="q">Pourquoi l'étape qui referme le port 22 utilise-t-elle <code>if: always()</code> ?</div>
+  <button>Pour rouvrir le port à la prochaine exécution sans réécrire la configuration.</button>
+  <button>Pour garantir la fermeture même si Ansible a échoué — sinon le port resterait ouvert.</button>
+  <button>Pour accélérer le job en exécutant la fermeture en parallèle des autres étapes.</button>
+  <button>Pour journaliser chaque tentative de connexion SSH pendant la durée du déploiement.</button>
+  <div class="explain"><code>if: always()</code> assure que la fermeture s'exécute QUOI QU'IL
+  ARRIVE, y compris si Ansible plante. Sans ça, un échec laisserait SSH ouvert. C'est cette
+  garantie qui rend le juste-à-temps fiable : on ne compte pas sur le succès pour refermer.</div>
+</div>
+<div class="quiz" data-answer="3">
+  <div class="q">Quel est le canal d'administration COURANTE de la plateforme ?</div>
+  <button>SSH en root, utilisé quotidiennement pour appliquer les manifestes Kubernetes.</button>
+  <button>Un VPN permanent qui maintient le port 22 ouvert pour les administrateurs autorisés.</button>
+  <button>L'accès direct à l'API Hetzner depuis le poste de l'administrateur via un token.</button>
+  <button>GitOps (ArgoCD) et kubectl ; SSH n'est qu'un break-glass juste-à-temps.</button>
+  <div class="explain">L'admin courante passe par GitOps (commit → ArgoCD) et kubectl. SSH est
+  un canal de secours (break-glass) pour le provisioning/debug, ouvert juste-à-temps par la
+  CI, jamais un accès permanent. C'est le zero-trust appliqué à l'accès admin.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (rappel, 5 min)</span>
+    <strong>NIST SP 800-207</strong> (la réduction de surface / per-session access) + ton
+    propre <code>README.md</code> § « Durcissement &amp; accès serveur ».
+    <a href="https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf">NIST SP 800-207</a>
+  </div>
+  <nav>
+    <span>← <a href="0016-k3s-vs-k8s.html">Leçon 16 — k3s vs k8s</a></span>
+    <span><strong>Suivant :</strong> <a href="0018-cloudflare-tunnel-terraform-cloud.html">Leçon 18 — Tunnel Cloudflare + Terraform Cloud : zéro port entrant</a> →</span>
+  </nav>
+  <p class="ask">Ton enseignant, c'est l'agent. Une question sur les certificats SSH éphémères (l'étape d'après) ? Demande-lui.</p>
+</footer>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 10 — SPIRE vs le mesh : qui émet l'identité en v2 ?</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 3 · Échelle — Leçon 10 / ~18 · clôt l'Acte 3</p>
+<h1>SPIRE vs le mesh : qui émet l'identité en v2 ?</h1>
+<p class="subtitle">Le piège que ton projet <em>tend</em> de lui-même : il s'appelle
+« SPIRE », mais la v2 tourne sous Istio. Alors… SPIRE sert-il encore ? Qui signe les
+identités maintenant ? Réponds juste, et tu désamorces une bombe.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  En v2, <strong>SPIRE n'est plus déployé</strong> : c'est <strong>istiod</strong> (le control
+  plane d'Istio) qui joue le rôle d'autorité de certification et émet les identités. Mais
+  attention — ces identités sont <em>toujours au format SPIFFE</em>. SPIFFE (la norme) reste ;
+  SPIRE (l'implémentation) est remplacé par celle d'Istio. <strong>Norme ≠ implémentation</strong>
+  — c'est la distinction de la leçon 3 qui paie ici.</p>
+</div>
+
+<h2>1. Le piège, posé clairement</h2>
+
+<p>Le jury va dire quelque chose comme : « Votre projet s'intitule <em>SPIRE Zero-Trust</em>,
+mais vous avez retiré SPIRE en v2 au profit d'Istio. C'est contradictoire, non ? » Si tu
+hésites, tu perds des points. Si tu réponds avec la bonne distinction, tu montres que tu as
+compris la couche profonde.</p>
+
+<p>La clé est un rappel de la <a href="0003-spire-attestation-trust-domain.html">leçon 3</a> :</p>
+
+<table>
+  <thead><tr><th></th><th>SPIFFE</th><th>SPIRE</th></tr></thead>
+  <tbody>
+    <tr><td>C'est…</td><td>une <strong>norme</strong> (le format d'identité)</td><td>une <strong>implémentation</strong> de cette norme</td></tr>
+    <tr><td>En v1</td><td class="ok">présent (format <code>spiffe://example.org/…</code>)</td><td class="ok">présent (Server + Agent, émet les SVID)</td></tr>
+    <tr><td>En v2</td><td class="ok"><strong>toujours présent</strong> (<code>spiffe://cluster.local/…</code>)</td><td class="no"><strong>retiré</strong> — remplacé par istiod</td></tr>
+  </tbody>
+</table>
+
+<h2>2. Ce qui change réellement entre v1 et v2</h2>
+
+<p>Regarde les SPIFFE ID des deux versions — tu les as déjà croisés :</p>
+
+<pre><code>v1 (SPIRE)  : spiffe://example.org/ns/shop/sa/orders
+v2 (Istio)  : spiffe://cluster.local/ns/shop/sa/orders</code></pre>
+
+<p>Même <em>structure</em> SPIFFE (trust domain + <code>/ns/.../sa/...</code>). Ce qui change :</p>
+<ul>
+  <li>Le <a href="../reference/glossaire.html#trust-domain">trust domain</a> :
+    <code>example.org</code> (que tu avais choisi) → <code>cluster.local</code> (le défaut
+    d'Istio).</li>
+  <li><strong>Qui signe</strong> : le SPIRE Server (v1) → <strong>istiod</strong> (v2), qui
+    est sa propre autorité de certification et fait la rotation des certs automatiquement.</li>
+  <li><strong>Qui atteste</strong> : l'Agent SPIRE (node + workload attestation) → le control
+    plane Istio, qui dérive aussi l'identité du <code>ServiceAccount</code> du pod.</li>
+</ul>
+
+<div class="note">
+  <span class="label">Dans ton infra — la preuve</span>
+  Dans <code>site.yml</code>, le rôle Ansible <code>istio</code> a <strong>remplacé</strong> le
+  rôle <code>spire</code> dans la liste jouée (le rôle <code>spire/</code> reste dans le dépôt
+  uniquement pour raconter la v1). Concrètement : <em>aucun pod SPIRE ne tourne en v2</em>.
+  istiod est la nouvelle autorité.
+</div>
+
+<h2>3. La nuance qui fait mouche : Istio PEUT utiliser SPIRE</h2>
+
+<p>Voici ce qui transforme une réponse correcte en réponse <em>brillante</em>. Istio et SPIRE
+ne sont pas rivaux : Istio sait <strong>déléguer</strong> son identité à SPIRE quand on le
+souhaite.</p>
+
+<div class="note">
+  <span class="label">istio.io — verbatim</span>
+  « Istio and SPIFFE share the same identity document: SVID… Istio uses X.509 certificates
+  to carry the identities in SPIFFE format. »
+  <br><span style="color:var(--muted);font-size:0.88rem;">Istio documente même une
+  intégration officielle où SPIRE devient la source des identités du mesh.</span>
+</div>
+
+<p>Donc trois configurations possibles, et tu sais laquelle tu as prise :</p>
+<ol>
+  <li><strong>SPIRE seul</strong> (ta v1) — l'app gère SPIFFE/mTLS via <code>go-spiffe</code>.</li>
+  <li><strong>Istio avec son CA intégré</strong> (ta v2) — istiod émet les identités SPIFFE,
+    le plus simple. <span class="tag allow">ton choix</span></li>
+  <li><strong>Istio + SPIRE</strong> — istiod délègue à SPIRE (utile pour une attestation
+    avancée, du multi-cluster, des workloads hors-Kubernetes). Tu ne l'as pas pris car
+    inutile à ton échelle, mais le citer prouve que tu connais la frontière.</li>
+</ol>
+
+<h2>4. Alors pourquoi le projet s'appelle encore « SPIRE » ?</h2>
+
+<p>Réponse assumée : parce que le projet <strong>raconte une évolution</strong>. La v1 sous
+SPIRE est le point de départ pédagogique (l'identité câblée à la main, pour comprendre la
+mécanique) ; la v2 sous Istio est l'aboutissement (la même identité SPIFFE, mais portée par
+la plateforme). Le nom honore le <em>concept</em> (SPIFFE/SPIRE = l'identité de workload),
+pas une dépendance figée. <strong>Le fil conducteur, c'est l'identité — pas le binaire qui
+l'émet.</strong></p>
+
+<div class="jury">
+  <span class="label">Question de jury (le piège)</span>
+  <p class="q">« Votre projet s'appelle SPIRE, mais vous n'utilisez plus SPIRE en v2. Vous
+  avez gardé un nom pour faire joli ? »</p>
+  <p><strong>Réponse :</strong> non, et la distinction est importante. <strong>SPIFFE</strong>
+  — la <em>norme</em> d'identité — est présent dans les <em>deux</em> versions : mes
+  identités sont des <code>spiffe://…/ns/shop/sa/...</code> en v1 comme en v2.
+  <strong>SPIRE</strong> — une <em>implémentation</em> de cette norme — n'est utilisé qu'en
+  v1 ; en v2 c'est istiod qui joue le rôle d'autorité, mais il émet le <em>même format</em>
+  SPIFFE. Le projet ne porte pas le nom d'une dépendance, il porte le nom du <em>concept</em>
+  qu'il démontre : l'identité de workload. D'ailleurs Istio peut <em>déléguer</em> à SPIRE si
+  on a besoin d'attestation avancée ou de multi-cluster — je ne l'ai pas fait car istiod
+  suffit à mon échelle, mais les deux sont conçus pour coopérer, pas pour s'exclure.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="1">
+  <div class="q">En v2 (Istio), qui émet les identités, et SPIFFE est-il encore présent ?</div>
+  <button>SPIRE émet toujours les identités ; Istio se contente de router le trafic mTLS.</button>
+  <button>istiod émet les identités ; SPIFFE (la norme) reste, SPIRE (l'implémentation) part.</button>
+  <button>Plus personne n'émet d'identité SPIFFE : Istio remplace SPIFFE par son propre format.</button>
+  <button>Kubernetes émet directement les certificats SPIFFE via l'API ServiceAccount native.</button>
+  <div class="explain">En v2, istiod est l'autorité qui signe les identités — au FORMAT SPIFFE
+  (<code>spiffe://cluster.local/ns/shop/sa/...</code>). SPIFFE (la norme) reste donc bien là ;
+  c'est SPIRE (l'implémentation v1) qui est remplacé par celle d'Istio. Norme ≠ implémentation.</div>
+</div>
+
+<div class="quiz" data-answer="2">
+  <div class="q">Pourquoi le projet garde-t-il le nom « SPIRE » alors que la v2 utilise Istio ?</div>
+  <button>Parce qu'Istio est en réalité une surcouche commerciale développée par SPIRE.</button>
+  <button>Parce que renommer le dépôt git casserait les références ArgoCD et la CI.</button>
+  <button>Parce que le nom honore le concept démontré — l'identité de workload — pas une dépendance.</button>
+  <button>Parce que SPIRE tourne toujours en arrière-plan pour signer les certificats d'Istio.</button>
+  <div class="explain">Le projet raconte une évolution : v1 sous SPIRE (l'identité à la main,
+  pour comprendre) → v2 sous Istio (la même identité SPIFFE, portée par la plateforme). Le nom
+  désigne le concept-fil-rouge (l'identité de workload), pas le binaire qui l'émet. SPIRE ne
+  tourne PAS en v2.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (10 min)</span>
+    <strong>istio.io — « Istio security » + l'intégration SPIRE</strong> : comment istiod
+    fait office de CA, et comment Istio peut déléguer à SPIRE.
+    <a href="https://istio.io/latest/docs/concepts/security/">istio.io/latest/docs/concepts/security/</a> ·
+    <a href="https://istio.io/latest/docs/ops/integrations/spire/">intégration SPIRE</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0009-istio-vs-linkerd-vs-cilium.html">Leçon 9 — Le choix du mesh</a></span>
+    <span><strong>Acte 3 bouclé.</strong> Transverse : <a href="0011-sast-dast-sca-iac-taxonomie.html">Leçon 11 — SAST/DAST/SCA/IaC-scan, la taxonomie</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Acte 3 terminé ! Tu veux une pause active
+  mode jury sur tout l'Acte 3 (leçons 6→10), ou on attaque le transverse (la pipeline) ?
+  Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

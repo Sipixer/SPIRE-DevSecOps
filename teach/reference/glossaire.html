@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossaire — SPIRE / DevSecOps Zero-Trust</title>
+<link rel="stylesheet" href="../assets/teach.css">
+<style>
+  /* Spécifique au glossaire : liste de définitions dense, ancrable. */
+  dl.glossary { margin: 1.5rem 0; }
+  dl.glossary dt {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-weight: 700; font-size: 1rem;
+    margin-top: 1.4rem; color: var(--ink);
+    scroll-margin-top: 1rem;
+  }
+  dl.glossary dt .fr { color: var(--muted); font-weight: 400; font-style: italic; font-size: 0.9rem; }
+  dl.glossary dd { margin: 0.3rem 0 0; }
+  dl.glossary dd .ex { color: var(--muted); font-size: 0.9rem; }
+  .index { columns: 2; column-gap: 2rem; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.85rem; margin: 1.5rem 0; }
+  .index a { display: block; padding: 0.15rem 0; }
+  .cat { font-family: ui-sans-serif, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.7rem; font-weight: 700; color: var(--accent); margin-top: 2.2rem; border-top: 1px solid var(--rule); padding-top: 1rem; }
+</style>
+</head>
+<body>
+
+<p class="kicker">Référence · vocabulaire</p>
+<h1>Glossaire</h1>
+<p class="subtitle">L'autorité unique sur le vocabulaire du projet. Toute leçon s'y conforme.
+Termes en anglais (norme du métier) avec l'équivalent français.</p>
+
+<div class="key">
+  <span class="label">Comment lire ce glossaire</span>
+  Chaque définition tient en une ou deux phrases, avec un exemple tiré de
+  <strong>ton</strong> projet. C'est un document de révision « coup d'œil avant l'oral » :
+  si tu butes sur un mot pendant la soutenance, il est ici.
+</div>
+
+<div class="index">
+  <a href="#zero-trust">Zero-trust</a>
+  <a href="#perimeter">Périmètre / castle-and-moat</a>
+  <a href="#lateral">Lateral movement</a>
+  <a href="#authn-authz">AuthN vs AuthZ</a>
+  <a href="#workload">Workload</a>
+  <a href="#workload-identity">Workload identity</a>
+  <a href="#spiffe">SPIFFE</a>
+  <a href="#spiffe-id">SPIFFE ID</a>
+  <a href="#svid">SVID</a>
+  <a href="#trust-domain">Trust domain</a>
+  <a href="#workload-api">Workload API</a>
+  <a href="#spire">SPIRE</a>
+  <a href="#attestation">Attestation</a>
+  <a href="#mtls">mTLS</a>
+  <a href="#service-mesh">Service mesh</a>
+  <a href="#sidecar">Sidecar</a>
+  <a href="#envoy">Envoy</a>
+  <a href="#control-data-plane">Control / data plane</a>
+  <a href="#istio">Istio</a>
+  <a href="#xfcc">XFCC</a>
+  <a href="#policy">AuthorizationPolicy</a>
+  <a href="#gitops">GitOps</a>
+  <a href="#argocd">ArgoCD</a>
+  <a href="#iac">IaC</a>
+  <a href="#sast">SAST</a>
+  <a href="#dast">DAST</a>
+  <a href="#sca">SCA</a>
+  <a href="#supply-chain">Supply chain (sécu)</a>
+  <a href="#cosign">Cosign / Sigstore</a>
+  <a href="#slsa">SLSA</a>
+  <a href="#jit">SSH JIT</a>
+  <a href="#k3s">k3s</a>
+  <a href="#networkpolicy">NetworkPolicy</a>
+</div>
+
+<dl class="glossary">
+
+<p class="cat">Fondations zero-trust</p>
+
+<dt id="zero-trust">Zero-trust <span class="fr">— confiance zéro</span></dt>
+<dd>Modèle de sécurité où <strong>aucune confiance n'est accordée implicitement</strong>
+sur la base de l'emplacement réseau. Être « à l'intérieur » du réseau ne donne aucun
+droit : chaque accès doit être prouvé (identité) puis autorisé, à chaque requête.
+<span class="ex">Source : NIST SP 800-207, Tenet 2.</span></dd>
+
+<dt id="perimeter">Périmètre / castle-and-moat <span class="fr">— château fort</span></dt>
+<dd>Modèle traditionnel : un mur (firewall) sépare un « dedans » de confiance d'un
+« dehors » hostile. Faiblesse : une fois le mur franchi, plus rien ne protège.
+<span class="ex">L'opposé du zero-trust. Kindervag : « hard shell, soft chewy center ».</span></dd>
+
+<dt id="lateral">Lateral movement <span class="fr">— déplacement latéral</span></dt>
+<dd>Ce que fait un attaquant une fois entré : sauter de service en service à l'intérieur
+du réseau, sans obstacle, parce que le réseau interne fait confiance à lui-même.
+<span class="ex">« once attackers breach the perimeter, further lateral movement is unhindered » — NIST.</span></dd>
+
+<dt id="authn-authz">AuthN vs AuthZ <span class="fr">— authentification vs autorisation</span></dt>
+<dd><strong>AuthN</strong> = « <em>qui</em> es-tu ? » (prouver son identité).
+<strong>AuthZ</strong> = « as-tu le <em>droit</em> de faire ça ? ». On peut être
+authentifié et refusé.
+<span class="ex">Dans ton projet : Gateway est authentifiée (mTLS OK) mais pas autorisée sur <code>/pay</code> → 403.</span></dd>
+
+<p class="cat">Identité de workload (SPIFFE / SPIRE)</p>
+
+<dt id="workload">Workload <span class="fr">— charge de travail</span></dt>
+<dd>Une instance de logiciel en exécution : un processus, un conteneur, un pod. L'unité
+à qui on veut donner une identité.
+<span class="ex">Tes pods <code>gateway</code>, <code>orders</code>, <code>payments</code>… sont des workloads.</span></dd>
+
+<dt id="workload-identity">Workload identity <span class="fr">— identité de workload</span></dt>
+<dd>Une identité cryptographique attachée à un <em>service</em> (pas à un humain, pas à
+une IP). Permet à un service de prouver « je suis <code>orders</code> » indépendamment
+de son adresse réseau.
+<span class="ex">Le problème que SPIFFE résout : les IP ne scalent pas comme identité en k8s.</span></dd>
+
+<dt id="spiffe">SPIFFE <span class="fr">— Secure Production Identity Framework for Everyone</span></dt>
+<dd>Un <strong>ensemble de standards open-source</strong> (CNCF, <em>Graduated</em> depuis
+août 2022) pour identifier des systèmes logiciels dans des environnements dynamiques et
+hétérogènes. C'est une <em>norme</em>, pas un produit.
+<span class="ex">Définit le SPIFFE ID, le SVID, le trust domain, la Workload API.</span></dd>
+
+<dt id="spiffe-id">SPIFFE ID</dt>
+<dd>L'identité elle-même, sous forme d'URI : <code>spiffe://&lt;trust-domain&gt;/&lt;chemin&gt;</code>.
+Lisible, stable, indépendante de l'IP.
+<span class="ex">v1 : <code>spiffe://example.org/ns/shop/sa/orders</code>. v2 (Istio) : <code>spiffe://cluster.local/ns/shop/sa/orders</code>.</span></dd>
+
+<dt id="svid">SVID <span class="fr">— SPIFFE Verifiable Identity Document</span></dt>
+<dd>Le <strong>document vérifiable</strong> qui porte un SPIFFE ID : soit un certificat
+<strong>X.509</strong>, soit un <strong>JWT</strong>. C'est ce qu'un workload présente
+pour prouver son identité. Courte durée de vie (rotation automatique).
+<span class="ex">v1 : tes services Go récupèrent un X.509-SVID via <code>go-spiffe/v2</code>.</span></dd>
+
+<dt id="trust-domain">Trust domain <span class="fr">— domaine de confiance</span></dt>
+<dd>La racine de confiance d'un système : tous les workloads d'un même trust domain
+reçoivent des identités vérifiables contre la même clé racine. Frontière de sécurité.
+<span class="ex"><code>example.org</code> (v1) ou <code>cluster.local</code> (Istio v2).</span></dd>
+
+<dt id="workload-api">Workload API</dt>
+<dd>L'API (socket local) par laquelle un workload demande son SVID — <strong>sans avoir
+besoin de connaître sa propre identité ni de détenir un secret d'authentification</strong>.
+Résout le problème du « bootstrap trust » (pas de secret à co-déployer).
+<span class="ex">v1 : <code>workloadapi.NewX509Source(...)</code> dans tes services Go.</span></dd>
+
+<dt id="spire">SPIRE <span class="fr">— SPIFFE Runtime Environment</span></dt>
+<dd>L'<strong>implémentation de référence</strong> de SPIFFE. Un <em>Server</em> (autorité
+qui émet les SVID) + des <em>Agents</em> (un par nœud, exposent la Workload API). C'est
+le produit qui rend SPIFFE réel.
+<span class="ex">v1 de ton projet. Remplacé par le mesh Istio en v2 (qui implémente aussi SPIFFE).</span></dd>
+
+<dt id="attestation">Attestation</dt>
+<dd>Le processus par lequel SPIRE <strong>vérifie l'identité avant d'émettre un SVID</strong>,
+en deux temps : <em>node attestation</em> (prouver de quel nœud il s'agit) puis
+<em>workload attestation</em> (prouver quel processus demande, ex. via son ServiceAccount k8s).
+<span class="ex">SPIRE dérive l'identité du <code>ServiceAccount</code> du pod.</span></dd>
+
+<dt id="mtls">mTLS <span class="fr">— mutual TLS</span></dt>
+<dd>TLS où <strong>les deux parties</strong> présentent un certificat (pas seulement le
+serveur comme en HTTPS classique). Le client prouve aussi son identité. C'est le
+transport qui porte le SVID et le vérifie pendant le handshake.
+<span class="ex">v1 : <code>tlsconfig.MTLSClientConfig/MTLSServerConfig</code>. v2 : automatique via le mesh.</span></dd>
+
+<p class="cat">Service mesh</p>
+
+<dt id="service-mesh">Service mesh <span class="fr">— maillage de services</span></dt>
+<dd>Une couche d'infrastructure qui gère la communication <em>inter-services</em> (mTLS,
+identité, routage, autorisation, métriques) <strong>hors du code applicatif</strong>, via
+des proxies injectés à côté de chaque service.
+<span class="ex">v2 : Istio. Remplace le mTLS câblé à la main de la v1.</span></dd>
+
+<dt id="sidecar">Sidecar <span class="fr">— side-car</span></dt>
+<dd>Un conteneur déployé <strong>à côté</strong> du conteneur applicatif, dans le même pod,
+qui prend en charge une responsabilité transverse (ici le proxy réseau). L'app lui parle
+en local (HTTP clair) ; lui parle au monde (mTLS).
+<span class="ex">v1 : Envoy en sidecar manuel devant Analytics. v2 : injecté partout par Istio.</span></dd>
+
+<dt id="envoy">Envoy</dt>
+<dd>Le <strong>proxy</strong> haute performance (CNCF) utilisé comme sidecar. C'est lui qui
+exécute concrètement le mTLS, le routage et l'autorisation. Istio le pilote.
+<span class="ex">v1 : tu l'as configuré à la main (ConfigMap) pour Analytics. v2 : géré par Istio.</span></dd>
+
+<dt id="control-data-plane">Control plane / data plane <span class="fr">— plan de contrôle / de données</span></dt>
+<dd><strong>Data plane</strong> = les proxies qui voient passer le trafic réel.
+<strong>Control plane</strong> = le cerveau qui les configure (distribue identités, policies,
+routes).
+<span class="ex">Istio : <code>istiod</code> (control plane) configure les Envoy (data plane).</span></dd>
+
+<dt id="istio">Istio</dt>
+<dd>Le service mesh choisi en v2. Control plane = <code>istiod</code>. Émet lui-même des
+identités SPIFFE (dérivées du ServiceAccount), fait le mTLS automatique, applique les
+<code>AuthorizationPolicy</code>. Dashboard associé : <strong>Kiali</strong>.
+<span class="ex">Choisi pour sa maturité + le dashboard Kiali (vs Linkerd, plus simple mais moins riche).</span></dd>
+
+<dt id="xfcc">XFCC <span class="fr">— X-Forwarded-Client-Cert</span></dt>
+<dd>L'en-tête HTTP par lequel le sidecar Istio transmet à l'app l'identité de l'appelant
+<strong>après</strong> avoir vérifié le mTLS. Non falsifiable car posé par le proxy, pas
+par le client.
+<span class="ex">v2 : tes services Go lisent le champ <code>URI=spiffe://…</code> de XFCC pour le journal <code>/_calls</code>.</span></dd>
+
+<dt id="policy">AuthorizationPolicy</dt>
+<dd>Une ressource Kubernetes (Istio) qui déclare <strong>qui peut appeler quoi</strong>,
+hors du code. Dès qu'une policy ALLOW cible un service, tout ce qui n'est pas explicitement
+autorisé est <strong>refusé</strong> (403 émis par le sidecar, avant l'app).
+<span class="ex">v2 : <code>k8s/workloads/authz.yaml</code> — <code>/pay</code> réservé à <code>orders</code>.</span></dd>
+
+<p class="cat">Supply chain & livraison</p>
+
+<dt id="gitops">GitOps</dt>
+<dd>Pratique où <strong>Git est la source de vérité</strong> de l'état déployé : un agent
+dans le cluster réconcilie en continu le réel avec ce qui est décrit dans Git (modèle
+<em>pull</em>). Un rollback = un <code>git revert</code>.
+<span class="ex">Branche <code>deploy/prod</code> = état exact déployé ; ArgoCD la surveille.</span></dd>
+
+<dt id="argocd">ArgoCD</dt>
+<dd>L'outil GitOps de ton projet : il tourne <em>dans</em> le cluster, surveille
+<code>deploy/prod</code> et synchronise (selfHeal) automatiquement.
+<span class="ex">La CI pousse les tags d'images sur <code>deploy/prod</code> ; ArgoCD déploie.</span></dd>
+
+<dt id="iac">IaC <span class="fr">— Infrastructure as Code</span></dt>
+<dd>Décrire l'infrastructure dans des fichiers versionnés plutôt qu'à la main.
+<span class="ex">Terraform (le serveur Hetzner) + Ansible (la config du serveur).</span></dd>
+
+<dt id="sast">SAST <span class="fr">— Static Application Security Testing</span></dt>
+<dd>Analyse du <strong>code source</strong> (sans l'exécuter) pour trouver des failles.
+<span class="ex">Semgrep dans ta CI (rulesets <code>p/golang</code> + <code>p/security-audit</code>).</span></dd>
+
+<dt id="dast">DAST <span class="fr">— Dynamic Application Security Testing</span></dt>
+<dd>Test de l'application <strong>en cours d'exécution</strong>, vue de l'extérieur (boîte
+noire), comme un attaquant.
+<span class="ex">ZAP baseline dans ta CI.</span></dd>
+
+<dt id="sca">SCA <span class="fr">— Software Composition Analysis</span></dt>
+<dd>Analyse des <strong>dépendances</strong> (et images) pour repérer des CVE connues.
+<span class="ex">Trivy scanne tes images, bloquant sur HIGH/CRITICAL.</span></dd>
+
+<dt id="supply-chain">Supply chain (sécurité de la)</dt>
+<dd>Sécuriser <strong>toute la chaîne</strong> qui mène du code à la prod (dépendances,
+build, image, registre, déploiement) — pas seulement le code final.
+<span class="ex">Ta CI : lint IaC → SAST → SCA → build → signature → registre → GitOps.</span></dd>
+
+<dt id="cosign">Cosign / Sigstore</dt>
+<dd><strong>Cosign</strong> signe les images conteneur ; <strong>Sigstore</strong> est
+l'écosystème (dont le mode <em>keyless</em> via OIDC, sans clé à gérer). Garantit qu'une
+image vient bien de ta CI et n'a pas été altérée.
+<span class="ex"><code>cosign sign --yes</code> dans ta CI, signature keyless (id-token OIDC).</span></dd>
+
+<dt id="slsa">SLSA <span class="fr">— Supply-chain Levels for Software Artifacts</span></dt>
+<dd>Un référentiel de niveaux (1→3+) de maturité de la sécurité supply-chain (provenance,
+build vérifiable…). Le cadre dans lequel s'inscrivent la signature et la provenance.
+<span class="ex">Signer (Cosign) + épingler au SHA (deploy/prod) = des briques SLSA.</span></dd>
+
+<p class="cat">Infra & zero-trust réseau</p>
+
+<dt id="jit">SSH JIT <span class="fr">— juste-à-temps</span></dt>
+<dd>Le port 22 reste <strong>fermé par défaut</strong> ; il n'est ouvert que pour l'IP qui
+en a besoin, le temps d'une tâche, puis refermé — y compris en cas d'échec (<code>if: always()</code>).
+SSH devient un accès <em>break-glass</em>, pas un accès permanent.
+<span class="ex">Firewall Hetzner dynamique piloté par Terraform dans le workflow <code>infra</code>.</span></dd>
+
+<dt id="k3s">k3s</dt>
+<dd>Une distribution Kubernetes <strong>légère</strong> (un seul binaire) de Rancher,
+adaptée aux petits serveurs / edge. API et comportement identiques à k8s.
+<span class="ex">Ton cluster tourne sur un seul VPS Hetzner via k3s.</span></dd>
+
+<dt id="networkpolicy">NetworkPolicy <span class="fr">— politique réseau k8s</span></dt>
+<dd>Ressource Kubernetes native qui filtre le trafic <strong>au niveau L3/L4</strong>
+(IP + port) : « tel pod peut joindre tel pod ». <strong>Ne sait PAS</strong> distinguer
+deux routes HTTP (L7) sur le même service, ni se prémunir d'une IP usurpée. C'est le
+« concurrent » réseau du mTLS — complémentaire, pas équivalent.
+<span class="ex">Pourrait dire « Orders→Payments:8080 OK », mais pas « /order oui, /pay non ».
+Cette règle-là exige l'identité (mTLS) + l'autorisation par route.</span></dd>
+
+</dl>
+
+<div class="jury">
+  <span class="label">Question de jury — pourquoi pas juste des NetworkPolicy ?</span>
+  <p class="q">« Kubernetes a déjà les NetworkPolicy. Pourquoi ajouter SPIRE/mTLS pour
+  empêcher Catalog d'appeler <code>/pay</code> ? »</p>
+  <p><strong>Réponse en 3 temps :</strong></p>
+  <p>1. <strong>Granularité.</strong> Une NetworkPolicy raisonne en <em>tuyaux</em>
+  (IP:port). Catalog et Orders parlent à Payments sur le même <code>:8080</code> ; elle ne
+  peut pas autoriser <code>/order</code> et refuser <code>/pay</code> — ça, c'est du L7
+  (HTTP), invisible au réseau. Or ma règle métier <em>est</em> au niveau de la route.</p>
+  <p>2. <strong>Falsifiabilité.</strong> L'identité par IP est fragile : une IP de pod est
+  éphémère et recyclée, et dans un réseau plat elle peut être usurpée. La NetworkPolicy
+  vérifie l'<em>enveloppe</em>, pas l'<em>expéditeur</em>. Le mTLS prouve l'identité par la
+  <strong>clé privée</strong> du certificat — infalsifiable, contrairement à une IP ou à un
+  header <code>X-Caller</code>.</p>
+  <p>3. <strong>Les deux, en fait.</strong> NetworkPolicy = pare-feu interne grossier
+  (réduit la surface). mTLS + autorisation par route = preuve d'identité fine. Une vraie
+  prod a souvent les deux (défense en profondeur). Mon projet démontre la couche
+  <em>identité</em> car c'est elle qui exprime la règle métier ; la NetworkPolicy serait un
+  complément légitime.</p>
+  <p><strong>Formule :</strong> « La NetworkPolicy filtre des tuyaux. Le mTLS prouve des
+  identités. Ma règle — seul Orders peut payer — est une règle d'identité au niveau de la
+  route ; le réseau ne peut ni la voir ni la garantir contre l'usurpation. »</p>
+</div>
+
+<footer>
+  <div class="ask">Un terme manque ou n'est pas clair ? Demande à ton enseignant (l'agent) de l'ajouter ou de l'expliquer.</div>
+</footer>
+
+</body>
+</html>

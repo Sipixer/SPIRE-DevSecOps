@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cours — SPIRE / DevSecOps Zero-Trust</title>
+<link rel="stylesheet" href="assets/teach.css">
+<style>
+  .toc { list-style: none; padding: 0; }
+  .toc li { margin: 0.5rem 0; padding: 0.7rem 1rem; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
+  .toc li:hover { border-color: var(--muted); }
+  .toc .num { font-family: ui-monospace, monospace; color: var(--accent); font-weight: 700; margin-right: 0.6rem; }
+  .toc a { border: none; }
+  .act { font-family: ui-sans-serif, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.72rem; font-weight: 700; color: var(--accent); margin: 2.2rem 0 0.6rem; }
+</style>
+</head>
+<body>
+
+<p class="kicker">Cours complet · 18 leçons</p>
+<h1>SPIRE / DevSecOps — Zero-Trust</h1>
+<p class="subtitle">Maîtriser le « pourquoi » de chaque choix techno du projet, pour le
+défendre en soutenance. Lis dans l'ordre ; reviens-y avant l'oral.</p>
+
+<div class="key">
+  <span class="label">Comment utiliser ce cours</span>
+  Chaque leçon est courte, ancrée dans <strong>ton</strong> code, et vise 3 questions de jury :
+  <em>c'est quoi · pourquoi celui-là · pourquoi pas le concurrent</em>. Le
+  <a href="reference/glossaire.html">glossaire</a> est l'autorité sur le vocabulaire. Demande
+  à ton enseignant (l'agent) un <strong>quiz mode jury</strong> quand tu veux tester ta rétention.
+</div>
+
+<p class="act">Acte 1 · Identité — le socle conceptuel</p>
+<ul class="toc">
+  <li><span class="num">01</span><a href="lessons/0001-zero-trust-le-probleme.html">Pourquoi le réseau ne suffit pas</a></li>
+  <li><span class="num">02</span><a href="lessons/0002-spiffe-svid-identite-de-workload.html">SPIFFE &amp; SVID : l'identité de workload</a></li>
+  <li><span class="num">03</span><a href="lessons/0003-spire-attestation-trust-domain.html">SPIRE : comment l'identité est délivrée (attestation)</a></li>
+  <li><span class="num">04</span><a href="lessons/0004-mtls-le-handshake.html">mTLS : le handshake qui transporte l'identité</a></li>
+  <li><span class="num">05</span><a href="lessons/0005-authentifie-nest-pas-autorise.html">Authentifié ≠ autorisé : la policy /pay</a></li>
+</ul>
+
+<p class="act">Acte 2 · Multi-langage</p>
+<ul class="toc">
+  <li><span class="num">06</span><a href="lessons/0006-multi-langage-envoy-sidecar.html">Le problème du multi-langage : Envoy en sidecar</a></li>
+  <li><span class="num">07</span><a href="lessons/0007-data-plane-control-plane.html">Data plane vs control plane</a></li>
+</ul>
+
+<p class="act">Acte 3 · Échelle — le service mesh</p>
+<ul class="toc">
+  <li><span class="num">08</span><a href="lessons/0008-service-mesh-ce-quil-remplace.html">Le service mesh : ce qu'il remplace dans le code</a></li>
+  <li><span class="num">09</span><a href="lessons/0009-istio-vs-linkerd-vs-cilium.html">Istio vs Linkerd vs Cilium : le choix assumé</a></li>
+  <li><span class="num">10</span><a href="lessons/0010-spire-vs-mesh-qui-emet-lidentite.html">SPIRE vs le mesh : qui émet l'identité en v2 ?</a></li>
+</ul>
+
+<p class="act">Transverse · Supply chain &amp; pipeline</p>
+<ul class="toc">
+  <li><span class="num">11</span><a href="lessons/0011-sast-dast-sca-iac-taxonomie.html">SAST / DAST / SCA / IaC-scan : la taxonomie</a></li>
+  <li><span class="num">12</span><a href="lessons/0012-semgrep-trivy-zap-checkov.html">Semgrep / Trivy / ZAP / Checkov : outil par outil</a></li>
+  <li><span class="num">13</span><a href="lessons/0013-cosign-signature-slsa.html">Signature &amp; provenance : Cosign keyless, SLSA</a></li>
+  <li><span class="num">14</span><a href="lessons/0014-gitops-argocd-deploy-prod.html">GitOps &amp; ArgoCD : la branche deploy/prod</a></li>
+</ul>
+
+<p class="act">Transverse · Infra &amp; zero-trust réseau</p>
+<ul class="toc">
+  <li><span class="num">15</span><a href="lessons/0015-terraform-vs-ansible.html">Terraform vs Ansible : qui fait quoi</a></li>
+  <li><span class="num">16</span><a href="lessons/0016-k3s-vs-k8s.html">k3s vs k8s : la distribution légère</a></li>
+  <li><span class="num">17</span><a href="lessons/0017-ssh-juste-a-temps.html">SSH juste-à-temps : le firewall dynamique</a></li>
+  <li><span class="num">18</span><a href="lessons/0018-cloudflare-tunnel-terraform-cloud.html">Tunnel Cloudflare + Terraform Cloud : zéro port entrant</a></li>
+</ul>
+
+<p class="act">Référence</p>
+<ul class="toc">
+  <li><span class="num">📖</span><a href="reference/glossaire.html">Glossaire — l'autorité sur le vocabulaire (~30 termes)</a></li>
+</ul>
+
+<footer>
+  <p class="ask">Ton enseignant, c'est l'agent. Demande-lui un quiz mode jury, une leçon
+  supplémentaire, ou des précisions sur n'importe quel point.</p>
+</footer>
+
+</body>
+</html>

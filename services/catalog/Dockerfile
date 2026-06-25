@@ -1,7 +1,6 @@
 # Build statique puis image distroless : pas de shell, surface d'attaque minimale.
 FROM golang:1.26 AS build
 WORKDIR /src
-COPY go.mod ./
 COPY . .
 RUN CGO_ENABLED=0 go build -o /catalog .
 

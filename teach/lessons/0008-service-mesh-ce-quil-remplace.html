@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 8 — Le service mesh : ce qu'il remplace dans le code</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 3 · Échelle — Leçon 8 / ~18</p>
+<h1>Le service mesh : ce qu'il remplace dans ton code</h1>
+<p class="subtitle">Le climax de ta migration. La leçon 7 a posé le « comment » (control
+plane qui configure des proxies). Voici le « combien » : ce que ça <em>retire</em>
+concrètement de ton code — chiffres réels de ton dépôt à l'appui.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Passer au mesh n'a pas <em>ajouté</em> de la sécurité : ça l'a <strong>déplacée</strong>.
+  La même protection (mTLS, identité, autorisation) sort du code applicatif et devient une
+  responsabilité de la plateforme. Mesurable : <strong>−1300 lignes de code</strong> dans
+  tes services, pour la même garantie de sécurité.
+</div>
+
+<h2>1. La preuve par le diff — tes vrais chiffres</h2>
+
+<p>Le diff entre ton tag <code>v1-manual-mtls</code> et la v2 (sur <code>services/</code> et
+<code>k8s/</code>) :</p>
+
+<pre><code>28 files changed, 321 insertions(+), 1300 deletions(-)</code></pre>
+
+<p>Ce n'est pas un détail cosmétique. Regarde <em>ce qui</em> disparaît :</p>
+
+<table>
+  <thead><tr><th>Supprimé en v2</th><th>C'était quoi en v1</th><th>Qui s'en charge en v2</th></tr></thead>
+  <tbody>
+    <tr><td><code>go.mod</code> / <code>go.sum</code> (×4)</td><td>La dépendance <code>go-spiffe/v2</code></td><td>Le mesh (plus aucune lib SPIFFE dans l'app)</td></tr>
+    <tr><td><code>metrics.go</code> (×4, ~77 l. chacun)</td><td>Instrumentation Prometheus maison</td><td>Le proxy Envoy produit les métriques</td></tr>
+    <tr><td><code>envoy/envoy.yaml</code> (98 l.)</td><td>La config Envoy d'Analytics, à la main</td><td>istiod injecte et configure Envoy</td></tr>
+    <tr><td>~100 l. dans chaque <code>main.go</code></td><td>Configs mTLS + <code>guard()</code></td><td>mTLS auto + <code>AuthorizationPolicy</code></td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <span class="label">La phrase à dire en montrant le diff</span>
+  « Cette PR <strong>retire</strong> 1300 lignes et n'en ajoute que 321. Le code de sécurité
+  ne s'est pas allégé par magie : il a quitté l'application pour devenir de la configuration
+  déclarative dans Git. Moins de code applicatif à écrire, tester et auditer — pour la même
+  sécurité. »
+</div>
+
+<h2>2. Avant / après, ligne à ligne</h2>
+
+<p>Prends la Gateway. En v1, appeler un service voulait dire <em>construire un client mTLS</em> :</p>
+
+<pre><code>// v1 — gateway/main.go : il fallait une source SPIFFE + un client mTLS par cible
+source, _ := workloadapi.NewX509Source(ctx, ...)
+clientTLS := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeID(ordersID))
+client := &http.Client{Transport: &http.Transport{TLSClientConfig: clientTLS}}</code></pre>
+
+<p>En v2, le même appel est… du HTTP ordinaire. Le proxy ajoute le mTLS de façon
+transparente :</p>
+
+<pre><code>// v2 — gateway/main.go : un seul client HTTP banal, aucune crypto
+client := &http.Client{Timeout: 5 * time.Second}
+// le mesh chiffre, authentifie et n'autorise que les destinations permises.
+// L'identité de la Gateway est portée par son ServiceAccount, présentée
+// automatiquement par le proxy.</code></pre>
+
+<p>C'est <em>littéralement</em> le commentaire de ton <code>gateway/main.go</code> v2. Le
+développeur écrit du code métier ; la sécurité est devenue invisible et systématique.</p>
+
+<h2>3. Ce que le mesh prend en charge (la liste à connaître)</h2>
+
+<p>Quand on te demande « concrètement, qu'est-ce que le mesh fait pour vous ? », tu listes
+les quatre responsabilités qu'il a absorbées :</p>
+
+<ul>
+  <li><strong>mTLS automatique</strong> — entre tous les proxies, sans une ligne de crypto
+    dans l'app (rappel leçon 4). En v2 : <code>PeerAuthentication: STRICT</code>.</li>
+  <li><strong>Identité</strong> — SPIFFE dérivée du ServiceAccount, émise par istiod
+    (le mesh <em>implémente</em> SPIFFE, comme SPIRE le faisait — leçon 10).</li>
+  <li><strong>Autorisation</strong> — <code>AuthorizationPolicy</code> déclaratives, le 403
+    au niveau du proxy (rappel leçon 5).</li>
+  <li><strong>Observabilité</strong> — métriques, traces et topologie produites par les
+    proxies, sans <code>metrics.go</code> (d'où le dashboard <strong>Kiali</strong>).</li>
+</ul>
+
+<h2>4. La contrepartie — sois honnête sur le coût</h2>
+
+<p>Un bon candidat connaît aussi les <em>inconvénients</em> de son choix. Le mesh n'est pas
+gratuit :</p>
+
+<table>
+  <thead><tr><th>Avantage</th><th>Coût / inconvénient</th></tr></thead>
+  <tbody>
+    <tr><td>Sécurité uniforme, hors du code</td><td>Un proxy par pod = <strong>RAM/CPU en plus</strong></td></tr>
+    <tr><td>Indépendant du langage</td><td>Un saut réseau en plus = <strong>+latence</strong> (faible mais réelle)</td></tr>
+    <tr><td>Règles déclaratives auditables</td><td><strong>Complexité opérationnelle</strong> : un composant de plus à comprendre/débugger</td></tr>
+    <tr><td>−1300 lignes applicatives</td><td>Courbe d'apprentissage Istio (CRDs, injection…)</td></tr>
+  </tbody>
+</table>
+
+<p>D'où la règle de bon sens : <strong>le mesh se justifie à partir de plusieurs services
+en plusieurs langages</strong>. Pour un seul service Go, <code>go-spiffe</code> en direct
+(ta v1) était parfaitement raisonnable. C'est l'<em>échelle</em> et l'<em>hétérogénéité</em>
+qui font pencher la balance — exactement ton récit Acte 1 → Acte 2 → Acte 3.</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Vous avez supprimé 1300 lignes de code de sécurité. N'est-ce pas
+  dangereux ? Comment savez-vous que la sécurité est toujours là ? »</p>
+  <p><strong>Réponse :</strong> les 1300 lignes n'ont pas disparu, elles ont changé de forme.
+  Le mTLS qui était codé en Go est maintenant porté par les proxies (vérifiable :
+  <code>PeerAuthentication STRICT</code> + les cadenas mTLS dans Kiali). La policy
+  <code>guard()</code> est devenue <code>AuthorizationPolicy</code> dans Git (vérifiable :
+  la Gateway prend toujours un 403 sur <code>/pay</code>). Je peux le <em>prouver en direct</em> :
+  même comportement, même oracle de refus qu'en v1. La sécurité est même <em>plus</em>
+  auditable, parce qu'elle est déclarative et centralisée au lieu d'être éparpillée dans
+  cinq binaires. Ce n'est pas « moins de sécurité », c'est « la sécurité ailleurs, et
+  vérifiable ».</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="2">
+  <div class="q">Le passage au mesh retire ~1300 lignes des services. Qu'est-il arrivé à la sécurité ?</div>
+  <button>Elle a été réduite : on a accepté moins de garanties en échange de moins de code.</button>
+  <button>Elle est devenue optionnelle : chaque service choisit désormais d'activer le mTLS.</button>
+  <button>Elle a été déplacée : du code applicatif vers la plateforme (proxies + policies Git).</button>
+  <button>Elle a été dupliquée : le code reste et le mesh ajoute une seconde couche par-dessus.</button>
+  <div class="explain">La sécurité est DÉPLACÉE, pas supprimée. Le mTLS codé en Go devient du
+  mTLS porté par les proxies ; <code>guard()</code> devient <code>AuthorizationPolicy</code>
+  dans Git. Même garantie (la Gateway prend toujours 403 sur /pay), mais hors du code et plus
+  auditable.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <div class="q">Quel est un VRAI inconvénient du service mesh, à assumer devant le jury ?</div>
+  <button>Un proxy par pod ajoute de la consommation mémoire/CPU et un peu de latence.</button>
+  <button>Le mesh empêche d'utiliser plusieurs langages de programmation différents.</button>
+  <button>Le mesh oblige à exposer chaque service directement sur Internet sans firewall.</button>
+  <button>Le mesh supprime toute possibilité d'observer le trafic entre les services.</button>
+  <div class="explain">Le coût réel : un sidecar par pod consomme des ressources et ajoute un
+  saut réseau (latence), plus la complexité opérationnelle d'Istio. C'est pourquoi le mesh se
+  justifie à l'échelle (plusieurs services, plusieurs langages) — pas pour un service unique.
+  Connaître ses inconvénients = signe de maîtrise.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (10 min)</span>
+    <strong>Istio — « What is Istio? » + « Security »</strong> : ce que le mesh prend en
+    charge (mTLS, identité, autorisation, télémétrie) sans toucher au code.
+    <a href="https://istio.io/latest/docs/concepts/security/">istio.io/latest/docs/concepts/security/</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0007-data-plane-control-plane.html">Leçon 7 — Data/control plane</a></span>
+    <span><strong>Suivant :</strong> <a href="0009-istio-vs-linkerd-vs-cilium.html">Leçon 9 — Istio vs Linkerd vs Cilium : le choix assumé</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux explorer le diff complet d'un service,
+  ou attaquer la comparaison des meshes (le choix Istio) ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,8 +1,4 @@
-// Catalog affiche les produits. Il n'appelle personne. En v2, le mTLS et
-// l'autorisation sont portés par le mesh (Linkerd) : l'app parle HTTP clair,
-// et la politique « qui peut appeler /products » est déclarée hors du code dans
-// des AuthorizationPolicy Linkerd (voir k8s/workloads/authz.yaml). Une requête
-// non autorisée est rejetée par le proxy avant d'atteindre ce code.
+// Catalog : sert les produits (mTLS Istio, autorisation via AuthorizationPolicy).
 package main
 
 import (
@@ -67,8 +63,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, mux)) // nosemgrep: go.lang.security.audit.net.use-tls.use-tls
 }
 
-// logged journalise l'appel puis délègue. L'autorisation est déjà faite par le
-// proxy Linkerd en amont : toute requête qui arrive ici a été autorisée.
+// logged journalise l'appel puis délègue (l'autorisation a déjà été faite par le sidecar).
 func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := callerID(r)
@@ -79,9 +74,7 @@ func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Re
 	}
 }
 
-// callerID lit l'identité de l'appelant dans l'en-tête X-Forwarded-Client-Cert
-// (XFCC) posé par le sidecar Istio après vérification du mTLS. Le champ URI
-// contient le SPIFFE ID de l'appelant (spiffe://cluster.local/ns/shop/sa/<sa>).
+// callerID lit le SPIFFE ID de l'appelant dans le header XFCC posé par le sidecar Istio.
 func callerID(r *http.Request) string {
 	xfcc := r.Header.Get("X-Forwarded-Client-Cert")
 	if xfcc == "" {
@@ -93,7 +86,6 @@ func callerID(r *http.Request) string {
 	return "(inconnu)"
 }
 
-// xfccURI extrait le champ URI=spiffe://... du header XFCC d'Istio.
 var xfccURI = regexp.MustCompile(`URI=([^;,]+)`)
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -76,7 +76,7 @@ variable "kiali_hostname" {
 }
 
 variable "access_allowed_email" {
-  description = "Email autorisé à passer Cloudflare Access pour atteindre ArgoCD"
+  description = "Email autorisé à passer Cloudflare Access (ArgoCD, Grafana, Kiali)"
   type        = string
   default     = "sipixer@gmail.com"
 }

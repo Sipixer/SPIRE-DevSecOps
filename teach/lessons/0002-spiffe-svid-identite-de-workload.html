@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 2 — SPIFFE & SVID : l'identité de workload</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 1 · Identité — Leçon 2 / ~18</p>
+<h1>SPIFFE &amp; SVID : donner une identité à un service</h1>
+<p class="subtitle">La leçon 1 a posé le problème : le réseau ne prouve pas <em>qui</em>
+appelle. Voici la brique qui répond — une identité cryptographique attachée à un service,
+pas à une IP.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  <strong>SPIFFE est une <em>norme</em> qui donne à chaque service un nom vérifiable</strong>
+  (<code>spiffe://…/orders</code>), porté par un document signé à courte durée de vie
+  (le <a href="../reference/glossaire.html#svid">SVID</a>). Ce nom ne dépend ni de l'IP,
+  ni d'un mot de passe partagé — et on ne peut pas le falsifier.
+</div>
+
+<h2>1. Trois mots à ne pas confondre</h2>
+
+<p>Le jury va tester si tu distingues la <em>norme</em>, l'<em>identité</em> et le
+<em>document</em>. Garde cette hiérarchie nette :</p>
+
+<table>
+  <thead><tr><th>Terme</th><th>C'est…</th><th>Analogie</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><a href="../reference/glossaire.html#spiffe">SPIFFE</a></td>
+      <td>Une <strong>norme</strong> open-source (CNCF). Pas un logiciel.</td>
+      <td>La <em>spécification</em> du passeport (ce qu'il doit contenir)</td>
+    </tr>
+    <tr>
+      <td><a href="../reference/glossaire.html#spiffe-id">SPIFFE ID</a></td>
+      <td>Le <strong>nom</strong> : un URI <code>spiffe://domaine/chemin</code>.</td>
+      <td>Le <em>numéro</em> inscrit sur le passeport</td>
+    </tr>
+    <tr>
+      <td><a href="../reference/glossaire.html#svid">SVID</a></td>
+      <td>Le <strong>document vérifiable</strong> qui porte le SPIFFE ID (X.509 ou JWT).</td>
+      <td>Le <em>passeport physique</em> lui-même, signé, infalsifiable, qui expire</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <span class="label">Définition officielle — spiffe.io</span>
+  « SPIFFE … is a set of <strong>open-source standards</strong> for securely identifying
+  software systems in dynamic and heterogeneous environments. »
+  <br><span style="color:var(--muted);font-size:0.88rem;">SPIFFE = <em>Secure Production
+  Identity Framework <strong>for</strong> Everyone</em> (« for » minuscule — détail
+  d'attribution exact). CNCF <strong>Graduated</strong> depuis août 2022.</span>
+</div>
+
+<h2>2. À quoi ressemble une identité, dans <em>ton</em> code</h2>
+
+<p>Dans la v1 de ton projet, Payments connaît les identités de tous les services. Ce sont
+des SPIFFE ID, lisibles à l'œil nu :</p>
+
+<pre><code>// services/payments/main.go (v1, tag v1-manual-mtls)
+const (
+    gatewayID  = "spiffe://example.org/ns/shop/sa/gateway"
+    ordersID   = "spiffe://example.org/ns/shop/sa/orders"
+    catalogID  = "spiffe://example.org/ns/shop/sa/catalog"
+    paymentsID = "spiffe://example.org/ns/shop/sa/payments"
+)</code></pre>
+
+<p>Décortique <code>spiffe://example.org/ns/shop/sa/orders</code> :</p>
+
+<ul>
+  <li><code>spiffe://</code> — le schéma d'URI de la norme.</li>
+  <li><code>example.org</code> — le <a href="../reference/glossaire.html#trust-domain">trust
+    domain</a> (la racine de confiance ; on y revient en leçon 3).</li>
+  <li><code>/ns/shop/sa/orders</code> — le chemin. Ici il <strong>dérive du Kubernetes</strong> :
+    <em>namespace</em> <code>shop</code>, <em>ServiceAccount</em> <code>orders</code>.</li>
+</ul>
+
+<p>Point clé : <strong>l'identité vient du <code>ServiceAccount</code> du pod</strong>, pas
+de son IP ni de son nom de pod (qui change à chaque redémarrage). C'est stable et ça a un
+sens métier.</p>
+
+<h2>3. Pourquoi pas juste un token ou une clé d'API ?</h2>
+
+<p>C'est <em>la</em> question que le jury va poser. La réponse tient en un mot :
+<strong>bootstrap</strong> — comment le secret arrive-t-il dans le service au départ ?</p>
+
+<p>Avec un token / une clé d'API partagée :</p>
+<ul>
+  <li>Il faut <strong>le déposer</strong> dans chaque service (variable d'env, Secret k8s,
+    fichier). Ce secret traîne, fuit dans les logs, dans Git, dans une image.</li>
+  <li>Il est <strong>partagé et statique</strong> : si Orders et Payments connaissent la
+    même clé, voler l'un compromet l'autre. Et la clé ne tourne jamais.</li>
+  <li>Il est <strong>porteur</strong> (« bearer ») : quiconque le détient <em>est</em>
+    Orders. Aucune preuve de possession.</li>
+</ul>
+
+<p>Avec SPIFFE, c'est l'inverse — grâce à la <a href="../reference/glossaire.html#workload-api">Workload
+API</a> :</p>
+
+<div class="note">
+  <span class="label">Spec Workload API — verbatim</span>
+  « the Workload API <strong>does not require that a calling workload … possess any
+  authentication token</strong> when calling the API. This means your application need not
+  co-deploy any authentication secrets with the workload. »
+</div>
+
+<p>Le service ne détient <strong>aucun secret au démarrage</strong>. Il demande son identité
+à un socket local, et l'infrastructure (SPIRE) la lui délivre <em>après l'avoir vérifié</em>
+(leçon 3). Dans ton code v1, ça tient en une ligne :</p>
+
+<pre><code>// Aucun token en dur. Le service demande son SVID au socket de l'agent.
+source, err := workloadapi.NewX509Source(ctx,
+    workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+// socketPath = "unix:///run/spire/sockets/spire-agent.sock"
+svid, err := source.GetX509SVID()
+log.Printf("payments: identité %s", svid.ID)   // spiffe://example.org/ns/shop/sa/payments</code></pre>
+
+<table>
+  <thead><tr><th></th><th>Token / API key</th><th>SVID (SPIFFE)</th></tr></thead>
+  <tbody>
+    <tr><td>Secret à déployer ?</td><td class="no">Oui (fuit facilement)</td><td class="ok">Non</td></tr>
+    <tr><td>Durée de vie</td><td class="no">Statique, longue</td><td class="ok">Courte, rotation auto</td></tr>
+    <tr><td>Preuve de possession</td><td class="no">Non (bearer)</td><td class="ok">Oui (clé privée)</td></tr>
+    <tr><td>Lié à l'identité réelle</td><td class="no">Indirect</td><td class="ok">Directe (ServiceAccount)</td></tr>
+  </tbody>
+</table>
+
+<h2>4. X.509 ou JWT ? Les deux formes du SVID</h2>
+
+<p>Un SVID existe sous deux formes, et tu dois savoir <em>laquelle tu utilises et pourquoi</em> :</p>
+
+<ul>
+  <li><strong>X.509-SVID</strong> — un <em>certificat</em>. Idéal pour le transport
+    <a href="../reference/glossaire.html#mtls">mTLS</a> : l'identité est prouvée pendant le
+    handshake, en continu, par la connexion elle-même. <strong>C'est ce que ton projet
+    utilise</strong> (v1 comme v2).</li>
+  <li><strong>JWT-SVID</strong> — un <em>jeton</em> signé. Utile quand on traverse un
+    intermédiaire qui ne fait pas de mTLS (ex. un load-balancer L7), où on a besoin d'un
+    jeton transportable dans un header.</li>
+</ul>
+
+<p>Pour ton cas — du service-à-service interne — le X.509 est le bon choix : la preuve
+d'identité est <em>la connexion</em>, pas un jeton qu'on se passe et qu'on pourrait rejouer.</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Votre SPIFFE ID contient <code>ns/shop/sa/orders</code>. N'importe quel
+  attaquant peut lire ça dans votre code. Qu'est-ce qui l'empêche de <em>prétendre</em>
+  être <code>orders</code> ? »</p>
+  <p><strong>Réponse :</strong> le SPIFFE ID est <em>public</em>, comme un numéro de
+  passeport — le connaître ne sert à rien. Ce qui prouve l'identité, c'est le
+  <strong>SVID</strong> : un certificat X.509 dont la <strong>clé privée</strong> ne quitte
+  jamais le workload légitime. Pour me faire passer pour <code>orders</code>, il ne suffit
+  pas de connaître son nom : il faut sa clé privée, que SPIRE n'a délivrée qu'à lui après
+  attestation (leçon 3). C'est la différence entre connaître un nom et <em>posséder</em>
+  l'identité.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="3">
+  <div class="q">Quelle est la différence exacte entre un SPIFFE ID et un SVID ?</div>
+  <button>Le SPIFFE ID est la version X.509, le SVID est la version JWT du même nom.</button>
+  <button>Le SPIFFE ID est délivré par SPIRE, le SVID est codé en dur dans le service.</button>
+  <button>Aucune : ce sont deux mots pour la même chaîne <code>spiffe://…</code> exactement.</button>
+  <button>Le SPIFFE ID est le nom (URI) ; le SVID est le document signé qui le porte.</button>
+  <div class="explain">Le SPIFFE ID est <em>le nom</em> (un URI, public, lisible). Le SVID
+  est <em>le document vérifiable</em> (certificat X.509 ou JWT) qui <em>contient</em> ce nom
+  et le rend prouvable via sa signature et sa clé privée. Nom vs passeport.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <div class="q">Pourquoi un SVID est-il plus sûr qu'une clé d'API partagée pour identifier un service ?</div>
+  <button>Aucun secret n'est déployé dans le service : il obtient son identité via la Workload API.</button>
+  <button>Le SVID est chiffré en AES-256 alors qu'une clé d'API reste en clair partout.</button>
+  <button>Le SVID est plus long à taper donc un humain ne peut pas le mémoriser de tête.</button>
+  <button>La clé d'API expire chaque heure tandis que le SVID reste valide indéfiniment.</button>
+  <div class="explain">Le cœur, c'est le <em>bootstrap</em> : un token/clé doit être déposé
+  (et fuit) ; le SVID est délivré à la demande via la Workload API, « need not co-deploy any
+  authentication secrets ». S'ajoutent la rotation courte et la preuve de possession (clé
+  privée), mais l'argument fondateur est l'absence de secret à déployer.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire à lire (10 min)</span>
+    <strong>spiffe.io — « SPIFFE Concepts »</strong> : les définitions officielles de
+    SPIFFE ID, SVID, trust domain et Workload API, au même endroit.
+    <a href="https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/">spiffe.io/docs/latest/spiffe-about/spiffe-concepts/</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0001-zero-trust-le-probleme.html">Leçon 1 — Le problème</a></span>
+    <span><strong>Suivant :</strong> <a href="0003-spire-attestation-trust-domain.html">Leçon 3 — SPIRE : comment l'identité est délivrée (attestation)</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux que je détaille X.509 vs JWT, qu'on
+  ouvre un vrai SVID au microscope, ou que je te grille en « mode jury » sur SPIFFE ?
+  Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 9 — Istio vs Linkerd vs Cilium : le choix assumé</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 3 · Échelle — Leçon 9 / ~18</p>
+<h1>Istio vs Linkerd vs Cilium : ton choix, assumé</h1>
+<p class="subtitle">LA question que le jury <em>va</em> poser : « pourquoi Istio et pas
+Linkerd ? ». Tu as même testé Linkerd avant de pivoter. Cette leçon te donne une réponse
+solide, honnête, et qui connaît ses concurrents.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Tu as choisi Istio pour <strong>la maturité + le dashboard Kiali</strong>. C'est défendable
+  — et deux arguments supplémentaires le renforcent : Istio porte une <strong>identité SPIFFE
+  native</strong> (cohérent avec ton sujet) et n'a <strong>pas de péage éditeur</strong> sur
+  ses versions stables (contrairement à Linkerd depuis 2024). Mais un bon candidat connaît
+  aussi <em>les forces de l'adversaire</em> : Linkerd est plus simple et léger, Cilium n'a
+  aucun sidecar.
+</div>
+
+<h2>1. Le tableau comparatif (à savoir reproduire)</h2>
+
+<table>
+  <thead><tr><th></th><th>Istio (ton choix)</th><th>Linkerd</th><th>Cilium</th></tr></thead>
+  <tbody>
+    <tr><td>Data plane</td><td>Envoy (C++), sidecar</td><td>micro-proxy <strong>Rust</strong>, sidecar</td><td><strong>eBPF</strong> (noyau), sans sidecar</td></tr>
+    <tr><td>Identité / mTLS</td><td class="ok">SPIFFE natif</td><td>ServiceAccount (SPIFFE only hors-cluster)</td><td>SPIFFE/SPIRE (mutual auth <em>Beta</em>)</td></tr>
+    <tr><td>Dashboard</td><td class="ok">Kiali (riche + validation config)</td><td>Linkerd Viz (simple)</td><td>Hubble UI</td></tr>
+    <tr><td>CNCF</td><td>Graduated (juil. 2023)</td><td>Graduated (juil. 2021, le 1er)</td><td>Graduated (oct. 2023)</td></tr>
+    <tr><td>Réputation</td><td>Le + riche, historiquement le + complexe</td><td>Le + simple, léger, rapide</td><td>Zéro overhead sidecar, + jeune comme mesh</td></tr>
+  </tbody>
+</table>
+
+<h2>2. Pourquoi Istio — tes arguments, du plus fort au plus subtil</h2>
+
+<h3>(a) Maturité + écosystème</h3>
+<p>Istio est <a href="https://www.cncf.io/announcements/2023/07/12/cloud-native-computing-foundation-reaffirms-istio-maturity-with-project-graduation/">CNCF
+Graduated</a> (juillet 2023), porté à l'origine par Google/IBM, avec le plus grand
+écosystème et la plus large base de doc/retours. Pour un projet à défendre, « le standard
+de fait, le plus documenté » est un argument de réduction de risque.</p>
+
+<h3>(b) Kiali — ta vraie raison, et elle tient</h3>
+<p>Kiali n'est pas « un dashboard de plus » : c'est <strong>le plus riche des trois</strong>.
+Graphe de topologie animé (trafic en temps réel), cadenas mTLS par arête, %succès/latences,
+et surtout <strong>validation de la configuration Istio</strong> — ni Linkerd Viz ni Hubble
+ne font ça. C'est exactement ce que tu montres en démo : la topologie <code>shop</code>
+vivante, l'arête Gateway→payments en rouge (le 403 zero-trust visible à l'œil).</p>
+
+<h3>(c) Identité SPIFFE native (l'argument « bonus » qui impressionne)</h3>
+<div class="note">
+  <span class="label">istio.io — verbatim</span>
+  « Istio and SPIFFE share the same identity document: <strong>SVID</strong>… Istio uses
+  X.509 certificates to carry the identities in SPIFFE format. »
+</div>
+<p>Istio parle nativement le format <code>spiffe://cluster.local/ns/shop/sa/orders</code> —
+<em>exactement</em> le vocabulaire de ton Acte 1. Linkerd, lui, dérive son identité du
+ServiceAccount et n'émet des SPIFFE ID que pour des workloads <em>hors-cluster</em>. Pour un
+projet qui s'appelle « SPIRE / SPIFFE », la continuité conceptuelle v1→v2 est un argument
+réel : <strong>même modèle d'identité, des deux côtés de la migration</strong>.</p>
+
+<h3>(d) Pas de péage éditeur (l'argument que peu connaissent)</h3>
+<div class="warn">
+  <span class="label">Fait citable — la friction Linkerd 2024</span>
+  Depuis <strong>mai 2024</strong>, l'éditeur de Linkerd (Buoyant) ne distribue plus
+  gratuitement les <em>versions stables</em> : les entreprises de <strong>plus de 50
+  salariés</strong> en production doivent payer (~2 000 $/cluster/mois). Le code et les
+  <em>edge releases</em> restent libres, mais les builds <em>stables</em> sont derrière un
+  paywall. <span style="color:var(--muted);font-size:0.86rem;">Sources : The New Stack,
+  TechTarget (2024).</span>
+</div>
+<p>Istio, gouverné par la CNCF, n'a pas ce modèle. C'est un argument <em>opérationnel</em>
+légitime : choisir Istio évite un péage sur les builds de production.</p>
+
+<h2>3. Sois honnête : les forces de tes concurrents</h2>
+
+<p>Un candidat qui descend en flammes les alternatives est suspect. Reconnais ce qui est
+vrai :</p>
+<ul>
+  <li><strong>Linkerd est plus simple et plus léger.</strong> Son micro-proxy en
+    <strong>Rust</strong> (mémoire-safe, conçu <em>uniquement</em> pour le mesh) a une
+    empreinte bien plus petite qu'Envoy. Fait architectural incontesté.</li>
+  <li><strong>Cilium n'a aucun sidecar.</strong> Le mTLS/routage se fait en <strong>eBPF</strong>
+    dans le noyau → zéro proxy par pod, zéro overhead de saut réseau. Séduisant — mais sa
+    mutual auth est encore <em>Beta</em>, et il est lié à son propre CNI.</li>
+</ul>
+
+<div class="warn">
+  <span class="label">⚠ Honnêteté sur les benchmarks</span>
+  Si tu cites « Linkerd est X fois plus léger », sache que <strong>les benchmarks publics
+  sont faits par les éditeurs eux-mêmes</strong> (celui de Buoyant favorise Linkerd ; ceux
+  d'Istio favorisent Istio). Il n'existe pas de benchmark CNCF neutre récent. À l'oral :
+  affirme le <em>fait architectural</em> (« Linkerd est plus léger par conception, micro-proxy
+  Rust vs Envoy complet ») mais <strong>ne cite pas de chiffre précis comme une vérité
+  neutre</strong> — précise sa source.
+</div>
+
+<h2>4. Le contre-argument complexité — et la réponse Ambient</h2>
+
+<p>Le reproche historique à Istio = « trop complexe ». Réponse à connaître : Istio a un
+mode <strong>Ambient</strong> (sans sidecar, GA depuis Istio 1.24 / nov. 2024) qui réduit
+fortement l'overhead et la complexité — c'est la réponse d'Istio à Linkerd/Cilium. Ton
+projet utilise le mode <em>sidecar</em> classique (mature, le plus documenté), mais savoir
+qu'Ambient existe montre que tu suis l'évolution.</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Vous avez testé Linkerd puis choisi Istio. Linkerd est pourtant réputé plus
+  simple et plus léger. N'avez-vous pas choisi le plus lourd par confort ? »</p>
+  <p><strong>Réponse :</strong> j'assume un arbitrage. Oui, Linkerd est plus léger — c'est un
+  fait, son micro-proxy Rust est plus petit qu'Envoy. Mais mes priorités étaient
+  l'<em>observabilité</em> et la <em>cohérence avec mon sujet SPIFFE</em>. Sur les deux, Istio
+  gagne : Kiali offre une topologie et une validation de config qu'aucun dashboard concurrent
+  n'égale — c'est central pour <em>démontrer</em> le zero-trust visuellement — et Istio porte
+  une identité SPIFFE native, donc mon modèle d'identité reste identique entre la v1 (SPIRE)
+  et la v2. S'ajoute un argument opérationnel : depuis 2024, les versions stables de Linkerd
+  sont payantes au-delà de 50 salariés, pas Istio. Pour un service unique j'aurais pris
+  Linkerd ; pour démontrer et défendre une architecture zero-trust observable, Istio était le
+  meilleur compromis — et le mode Ambient répond désormais au reproche de complexité.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="3">
+  <div class="q">Quelle est la différence d'architecture data plane entre Istio, Linkerd et Cilium ?</div>
+  <button>Les trois utilisent Envoy ; seule la configuration du control plane les distingue.</button>
+  <button>Istio et Cilium sont sans sidecar ; seul Linkerd injecte un proxy par pod en Go.</button>
+  <button>Istio utilise eBPF, Linkerd utilise Envoy, et Cilium un micro-proxy écrit en Rust.</button>
+  <button>Istio = Envoy/C++ sidecar ; Linkerd = micro-proxy Rust sidecar ; Cilium = eBPF noyau.</button>
+  <div class="explain">Istio s'appuie sur Envoy (C++) en sidecar ; Linkerd a son propre
+  micro-proxy en Rust (plus léger, conçu pour le mesh) ; Cilium fait le mesh en eBPF dans le
+  noyau, sans sidecar. C'est l'axe technique central de la comparaison.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <div class="q">Quel argument en faveur d'Istio est le plus cohérent avec un projet « SPIFFE/SPIRE » ?</div>
+  <button>Istio porte une identité SPIFFE native (spiffe://cluster.local/ns/…/sa/…).</button>
+  <button>Istio est le seul mesh à avoir été diplômé Graduated par la fondation CNCF.</button>
+  <button>Istio consomme moins de mémoire que Linkerd grâce à son proxy en langage Rust.</button>
+  <button>Istio est le seul mesh capable de faire du mTLS automatique entre les services.</button>
+  <div class="explain">Istio utilise nativement le format SPIFFE pour l'identité — exactement
+  le modèle de la v1 (SPIRE). La continuité v1→v2 est donc préservée. (Les autres options sont
+  fausses : Linkerd a été graduated AVANT Istio ; le proxy Rust c'est Linkerd, pas Istio ; et
+  les trois font du mTLS automatique.)</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (12 min)</span>
+    <strong>istio.io — « Istio & SPIRE / SPIFFE integration »</strong> et la page Kiali :
+    de quoi étayer tes deux arguments-clés (identité SPIFFE + observabilité).
+    <a href="https://istio.io/latest/docs/ops/integrations/spire/">istio.io/latest/docs/ops/integrations/spire/</a> ·
+    <a href="https://istio.io/latest/docs/ops/integrations/kiali/">Kiali</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0008-service-mesh-ce-quil-remplace.html">Leçon 8 — Ce que le mesh remplace</a></span>
+    <span><strong>Suivant :</strong> <a href="0010-spire-vs-mesh-qui-emet-lidentite.html">Leçon 10 — SPIRE vs le mesh : qui émet l'identité en v2 ? (le piège)</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux creuser eBPF, le mode Ambient, ou
+  passer au piège « SPIRE est-il encore là en v2 ? ». Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

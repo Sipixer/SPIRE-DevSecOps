@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 12 — Semgrep / Trivy / ZAP / Checkov : outil par outil</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Transverse · Pipeline — Leçon 12 / ~18</p>
+<h1>Tes quatre outils, un par un</h1>
+<p class="subtitle">La leçon 11 a posé les familles. Ici, les <em>outils concrets</em> de ta
+pipeline : ce que chacun fait, comment tu l'as réglé, et face à quels concurrents.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Quatre outils, quatre familles, quatre angles : <strong>Checkov</strong> (IaC),
+  <strong>Semgrep</strong> (SAST), <strong>Trivy</strong> (SCA) et <strong>ZAP</strong> (DAST).
+  Tu dois savoir, pour chacun, <em>ce qu'il regarde</em> et <em>pourquoi celui-là plutôt
+  qu'un autre</em>.</p>
+</div>
+
+<h2>1. Checkov + tflint — l'infrastructure (IaC-scan)</h2>
+<p><strong>tflint</strong> = linter Terraform (erreurs de syntaxe, mauvais types, conventions).
+<strong>Checkov</strong> = scan de <em>sécurité</em> de l'IaC : il connaît des centaines de
+règles (« ce bucket est public », « ce port est ouvert à 0.0.0.0/0 », « chiffrement
+manquant ») et les cherche dans ton Terraform.</p>
+<pre><code># ci.yml — bloquant : une mauvaise config de sécurité casse le build
+- uses: bridgecrewio/checkov-action@master
+  with: { directory: infra/terraform, framework: terraform, soft_fail: false }</code></pre>
+<p><strong>Concurrents :</strong> <code>tfsec</code> (fusionné dans Trivy depuis), <code>terrascan</code>,
+<code>KICS</code>. Checkov est le plus répandu, multi-frameworks (Terraform, k8s, Dockerfile…).</p>
+
+<h2>2. Semgrep — ton code Go (SAST)</h2>
+<p><strong>Semgrep</strong> cherche des <em>patterns</em> dangereux dans le code source, via
+des règles lisibles (« grep sémantique » qui comprend la structure du code, pas juste le
+texte). Tu utilises deux rulesets publics :</p>
+<pre><code># ci.yml — --error fait sortir en code ≠ 0 si une règle matche (bloquant)
+semgrep scan --config p/golang --config p/security-audit --error</code></pre>
+<p>Détail que tu peux citer : ton code a un <code>// nosemgrep: ...use-tls</code> sur le
+<code>ListenAndServe</code> en HTTP clair — c'est une <strong>exception documentée et
+assumée</strong> (le mTLS est porté par le mesh, pas par l'app). Savoir justifier un
+<code>nosemgrep</code> montre que tu ne subis pas l'outil, tu le pilotes.</p>
+<p><strong>Concurrents :</strong> <code>CodeQL</code> (GitHub, très puissant, plus lourd),
+<code>SonarQube</code> (qualité + sécu, serveur à héberger), <code>gosec</code> (spécifique
+Go). Semgrep : rapide, règles lisibles, multi-langage, bon en CI.</p>
+
+<h2>3. Trivy — tes images (SCA / CVE)</h2>
+<p><strong>Trivy</strong> scanne une image conteneur et liste les <a href="../reference/glossaire.html#sca">CVE</a>
+connues de ses paquets et de son image de base. Ton réglage est fin :</p>
+<pre><code># ci.yml
+severity: HIGH,CRITICAL          # on ne bloque que sur le grave
+ignore-unfixed: true             # pas de correctif dispo → on n'échoue pas pour rien
+exit-code: analytics ? 0 : 1     # bloquant pour TES services Go ; non-bloquant pour
+                                 # analytics (CVE de l'image Node de base, hors de ton contrôle)</code></pre>
+<p>Cette nuance est <em>excellente</em> à défendre : tu bloques sur ce que tu maîtrises (tes
+deps Go), tu signales sans bloquer ce que tu ne maîtrises pas (l'image Node de base). Tu
+arbitres le risque, tu ne l'ignores pas.</p>
+<p><strong>Concurrents :</strong> <code>Grype</code>, <code>Clair</code>, <code>Snyk</code>
+(commercial). Trivy (Aqua) est gratuit, ultra-répandu, scanne aussi l'IaC et les secrets.</p>
+
+<h2>4. ZAP baseline — l'app qui tourne (DAST)</h2>
+<p><strong>OWASP ZAP</strong> (Zed Attack Proxy) attaque l'application déployée en boîte
+noire. Le mode <em>baseline</em> est un scan passif rapide adapté à la CI : il repère les
+problèmes visibles de l'extérieur (headers de sécurité manquants, cookies non sécurisés…)
+sans attaque destructrice.</p>
+<p><strong>Concurrents :</strong> <code>Burp Suite</code> (référence pro, commercial),
+<code>Nikto</code>, <code>Nuclei</code>. ZAP est l'outil DAST open-source de référence (OWASP).</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Votre Trivy ne bloque pas le build pour Analytics. N'est-ce pas une faille
+  dans votre politique de sécurité ? »</p>
+  <p><strong>Réponse :</strong> c'est un arbitrage de risque <em>explicite</em>, pas un oubli.
+  Les CVE d'Analytics viennent de l'image Node de base — je ne les corrige pas dans mon code,
+  et bloquer dessus rendrait mon build rouge en permanence pour des choses hors de mon
+  contrôle, ce qui pousserait à tout désactiver. Je bloque donc sur ce que je <em>maîtrise</em>
+  (mes dépendances Go : <code>exit-code 1</code>) et je <em>signale sans bloquer</em> ce que
+  je subis (<code>exit-code 0</code> pour Analytics), avec <code>ignore-unfixed</code> pour ne
+  pas échouer sur des CVE sans correctif. La sécurité reste visible ; je choisis juste où
+  mettre la barrière bloquante. Une politique de sécurité crédible, c'est des arbitrages
+  documentés, pas du tout-ou-rien ingérable.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="2">
+  <div class="q">Associe correctement outil et famille dans ta pipeline.</div>
+  <button>Checkov = SAST, Semgrep = DAST, Trivy = IaC-scan, ZAP = SCA des dépendances.</button>
+  <button>Checkov = SCA, Semgrep = IaC-scan, Trivy = DAST, ZAP = SAST du code source.</button>
+  <button>Checkov = IaC-scan, Semgrep = SAST, Trivy = SCA, ZAP = DAST de l'app.</button>
+  <button>Checkov = DAST, Semgrep = SCA, Trivy = SAST, ZAP = IaC-scan Terraform.</button>
+  <div class="explain">Checkov scanne l'infra Terraform (IaC) ; Semgrep lit le code Go (SAST) ;
+  Trivy scanne les images pour des CVE (SCA) ; ZAP attaque l'app déployée (DAST). C'est la
+  taxonomie de la leçon 11 appliquée à tes vrais outils.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <div class="q">Pourquoi Trivy est-il bloquant pour les services Go mais pas pour Analytics ?</div>
+  <button>Parce qu'Analytics est écrit en Node.js, un langage que Trivy ne sait pas scanner.</button>
+  <button>Parce que les CVE d'Analytics viennent de l'image Node de base, hors du contrôle du code.</button>
+  <button>Parce qu'Analytics n'est pas exposé sur Internet, donc ses CVE sont sans risque réel.</button>
+  <button>Parce que le scan de l'image Node prend trop de temps et ferait échouer la CI au timeout.</button>
+  <div class="explain">Arbitrage explicite : on bloque sur ce qu'on maîtrise (les deps Go) et
+  on signale sans bloquer les CVE héritées de l'image Node de base (qu'on ne corrige pas
+  soi-même). C'est documenté dans le ci.yml, pas un oubli.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (au choix, 8 min)</span>
+    <strong>Trivy</strong> <a href="https://trivy.dev/">trivy.dev</a> ·
+    <strong>Semgrep</strong> <a href="https://semgrep.dev/docs/">semgrep.dev/docs</a> ·
+    <strong>OWASP ZAP</strong> <a href="https://www.zaproxy.org/">zaproxy.org</a> ·
+    <strong>Checkov</strong> <a href="https://www.checkov.io/">checkov.io</a>
+  </div>
+  <nav>
+    <span>← <a href="0011-sast-dast-sca-iac-taxonomie.html">Leçon 11 — La taxonomie</a></span>
+    <span><strong>Suivant :</strong> <a href="0013-cosign-signature-slsa.html">Leçon 13 — Signature &amp; provenance : Cosign keyless, SLSA</a> →</span>
+  </nav>
+  <p class="ask">Ton enseignant, c'est l'agent. Une question sur un outil précis ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

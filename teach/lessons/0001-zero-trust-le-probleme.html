@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 1 — Zero-trust : pourquoi le réseau ne suffit pas</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 1 · Identité — Leçon 1 / ~18</p>
+<h1>Pourquoi le réseau ne suffit pas</h1>
+<p class="subtitle">Le problème que <em>tout</em> ton projet cherche à résoudre. Avant de
+parler de SPIRE, de mesh ou de mTLS, il faut savoir contre quoi on se bat.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  <strong>Être joignable sur le réseau interne n'est pas une preuve d'identité.</strong>
+  Un service qui peut <em>atteindre</em> Payments n'a pas pour autant le <em>droit</em>
+  de le faire. Le zero-trust part de là : on ne fait confiance à personne juste parce
+  qu'il est « à l'intérieur ».
+</div>
+
+<h2>1. Le vieux modèle : le château fort</h2>
+
+<p>L'architecture réseau classique fonctionne comme un château fort
+(<a href="../reference/glossaire.html#perimeter">castle-and-moat</a>) : un mur — le
+firewall — sépare un <strong>dedans</strong> de confiance d'un <strong>dehors</strong>
+hostile. Tout ce qui est à l'intérieur du réseau est présumé légitime.</p>
+
+<p>Le problème est connu et documenté au plus haut niveau. Le standard de référence,
+le <strong>NIST SP 800-207</strong>, le dit noir sur blanc :</p>
+
+<div class="note">
+  <span class="label">NIST SP 800-207 §1 — verbatim</span>
+  « Perimeter-based network security has also been shown to be insufficient since
+  <strong>once attackers breach the perimeter, further lateral movement is unhindered</strong>. »
+  <br><span style="color:var(--muted);font-size:0.88rem;">→ Une fois le mur franchi, le
+  <a href="../reference/glossaire.html#lateral">déplacement latéral</a> ne rencontre
+  aucun obstacle.</span>
+</div>
+
+<p>Autrement dit : il suffit qu'<em>un seul</em> service soit compromis (une CVE, une
+dépendance vérolée, une mauvaise config) pour que l'attaquant, désormais « à l'intérieur »,
+puisse parler à tous les autres. Le mur ne protège que la frontière, jamais l'intérieur.</p>
+
+<h2>2. Ton projet, sans zero-trust</h2>
+
+<p>Regarde concrètement ta boutique. Cinq services se parlent :</p>
+
+<pre><code>Gateway  ──&gt; Orders ──&gt; Payments
+Gateway  ──&gt; Catalog
+Gateway  ──&gt; Analytics</code></pre>
+
+<p>Dans un réseau k3s « plat », <strong>n'importe quel pod peut ouvrir une connexion vers
+n'importe quel autre</strong>. Rien n'empêche techniquement la Gateway — ou un attaquant
+qui aurait pris le contrôle de Catalog — d'appeler directement <code>Payments /pay</code>
+et de déclencher un paiement.</p>
+
+<p>Pourtant, ta règle métier est claire et c'est le fil rouge de toute ta démo :</p>
+
+<div class="key">
+  <span class="label">La règle sensible</span>
+  <strong>Seul Orders peut déclencher un paiement.</strong> Gateway peut orchestrer une
+  commande, Catalog peut exposer des produits — mais aucun des deux ne doit pouvoir
+  appeler <code>/pay</code> directement.
+</div>
+
+<p>Le réseau, à lui seul, est incapable d'exprimer cette règle. Il sait <em>router</em>
+des paquets ; il ne sait pas <em>qui</em> parle ni <em>ce qu'il a le droit</em> de faire.</p>
+
+<h2>3. Deux questions, pas une</h2>
+
+<p>Tout le projet repose sur la distinction entre deux questions que le réseau confond :</p>
+
+<table>
+  <thead>
+    <tr><th>Question</th><th>Nom</th><th>Dans ton projet</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><em>Qui</em> appelle ?</td>
+      <td><a href="../reference/glossaire.html#authn-authz">Authentification</a> (AuthN)</td>
+      <td>Prouver « je suis <code>orders</code> » par cryptographie, pas par IP</td>
+    </tr>
+    <tr>
+      <td>A-t-il le <em>droit</em> ?</td>
+      <td><a href="../reference/glossaire.html#authn-authz">Autorisation</a> (AuthZ)</td>
+      <td><code>/pay</code> n'accepte que <code>orders</code> — sinon <span class="tag deny">403 denied</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>La conséquence est le cœur philosophique du zero-trust :
+<strong>on peut être authentifié <em>et</em> refusé</strong>. Dans ta démo, Gateway possède
+une identité parfaitement valide (le mTLS réussit) — et se fait quand même renvoyer un
+<span class="tag deny">403</span> sur <code>/pay</code>, parce qu'elle n'est pas
+<em>autorisée</em>. C'est ça, la démonstration vivante que « être dans le réseau » ne vaut
+rien.</p>
+
+<h2>4. La définition à connaître par cœur</h2>
+
+<p>Si le jury te demande « c'est quoi le zero-trust ? », la réponse canonique vient du
+NIST, pas d'un blog :</p>
+
+<div class="note">
+  <span class="label">NIST SP 800-207, Tenet 2 — verbatim</span>
+  « All communication is secured regardless of network location.
+  <strong>Network location alone does not imply trust.</strong> »
+</div>
+
+<div class="warn">
+  <span class="label">⚠ Piège d'attribution (à ne pas rater)</span>
+  Le slogan « <strong>never trust, always verify</strong> » n'est <em>pas</em> du NIST :
+  il vient de <strong>Forrester / John Kindervag (2010)</strong>, et sa formulation
+  d'origine était même « <em>verify and never trust</em> ». Le NIST, lui, parle de
+  « no implicit trust ». Citer la bonne source au bon auteur = un point facile à l'oral,
+  et une erreur facile à éviter.
+</div>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Mais si vous avez déjà un firewall et un réseau privé, pourquoi en
+  rajouter ? Le zero-trust ne fait-il pas doublon ? »</p>
+  <p><strong>Réponse :</strong> le firewall protège le <em>périmètre</em> ; il ne dit rien
+  de ce qui se passe <em>à l'intérieur</em>. Le jour où un service est compromis,
+  l'attaquant est « dedans » et le firewall ne le voit plus. Le zero-trust est de la
+  <em>défense en profondeur</em> : il ajoute une preuve d'identité <em>à chaque appel
+  interne</em>, pas seulement à l'entrée. Les deux sont complémentaires — d'ailleurs mon
+  projet garde le firewall (port 22 fermé, JIT) <em>et</em> impose le mTLS interne.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="2">
+  <div class="q">Dans ta boutique, la Gateway tente d'appeler <code>Payments /pay</code>.
+  Le mTLS réussit (identité valide). Que se passe-t-il, et pourquoi ?</div>
+  <button>Ça passe : un mTLS réussi prouve qu'on a le droit d'appeler la route.</button>
+  <button>Ça casse : le mTLS de la Gateway est rejeté faute d'un certificat valide.</button>
+  <button>403 : authentifiée mais pas autorisée — la policy réserve /pay à Orders.</button>
+  <button>200 : tout pod du réseau interne peut joindre Payments donc c'est permis.</button>
+  <div class="explain">Le mTLS répond à « qui es-tu ? » (AuthN) — il réussit, la Gateway
+  a une identité valide. Mais « as-tu le droit ? » (AuthZ) est une question séparée : la
+  policy réserve <code>/pay</code> à Orders, donc 403. C'est <em>la</em> démonstration que
+  être authentifié ≠ être autorisé.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <div class="q">Pourquoi le NIST dit-il que la sécurité périmétrique est « insufficient » ?</div>
+  <button>Parce qu'un firewall est trop lent pour le trafic des microservices modernes.</button>
+  <button>Parce qu'une fois le périmètre franchi, le déplacement latéral est sans entrave.</button>
+  <button>Parce que les adresses IP changent trop souvent pour être filtrées finement.</button>
+  <button>Parce que le chiffrement TLS périmétrique consomme trop de ressources CPU.</button>
+  <div class="explain">« once attackers breach the perimeter, further lateral movement is
+  unhindered » (NIST SP 800-207, §1). Le mur ne protège que la frontière ; à l'intérieur,
+  tout se fait confiance. C'est l'argument fondateur du zero-trust.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire à lire (15 min)</span>
+    <strong>NIST SP 800-207 — Zero Trust Architecture</strong>, l'<em>Abstract</em> et la
+    §2 (« Zero Trust Basics », les 7 tenets).
+    <a href="https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf">nvlpubs.nist.gov/…/NIST.SP.800-207.pdf</a>.
+    C'est <em>la</em> référence que tu cites si on te demande une définition.
+  </div>
+
+  <nav>
+    <span>← <a href="../reference/glossaire.html">Glossaire</a></span>
+    <span><strong>Suivant :</strong> <a href="0002-spiffe-svid-identite-de-workload.html">Leçon 2 — SPIFFE &amp; SVID : l'identité de workload</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Quelque chose n'est pas clair, tu veux
+  creuser le NIST, ou tu veux que je te pose des questions « mode jury » sur cette leçon ?
+  Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

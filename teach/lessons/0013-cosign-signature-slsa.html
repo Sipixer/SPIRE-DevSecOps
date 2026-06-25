@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 13 — Signature & provenance : Cosign keyless, SLSA</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Transverse · Pipeline — Leçon 13 / ~18</p>
+<h1>Signer l'image : Cosign keyless &amp; provenance</h1>
+<p class="subtitle">Scanner répond à « cette image a-t-elle des failles ? ». Signer répond à
+une autre question, tout aussi vitale : <strong>« cette image vient-elle bien de MA
+pipeline, et n'a-t-elle pas été modifiée depuis ? »</strong></p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Signer une image prouve son <strong>origine</strong> et son <strong>intégrité</strong> —
+  pas son innocuité. <strong>Cosign keyless</strong> le fait <em>sans clé à gérer</em> :
+  l'identité OIDC de ta CI GitHub sert de preuve, un certificat éphémère est émis, et la
+  signature est inscrite dans un registre public infalsifiable.</p>
+</div>
+
+<h2>1. Le problème : à qui fais-tu confiance pour une image ?</h2>
+<p>Ton cluster va exécuter une image tirée de GHCR. Comment être sûr qu'elle a bien été
+produite par <em>ta</em> pipeline, et pas substituée par un attaquant qui aurait poussé une
+image vérolée sous le même nom ? Le scan (Trivy) ne répond pas à ça : une image malveillante
+peut être « sans CVE ». Il faut une <strong>preuve d'origine</strong> : une signature.</p>
+
+<h2>2. Keyless : pourquoi c'est malin</h2>
+<p>Signer « classiquement » suppose une <strong>clé privée</strong> à stocker, protéger, faire
+tourner — un secret de plus qui peut fuir (exactement le problème de la leçon 2, côté supply
+chain !). Le mode <strong>keyless</strong> de Sigstore l'évite :</p>
+<ol>
+  <li>La CI génère une paire de clés <strong>éphémère</strong> (jetée juste après).</li>
+  <li>Elle présente son <strong>jeton OIDC</strong> (le <code>id-token</code> GitHub Actions) à
+    <strong>Fulcio</strong>, l'autorité qui émet un <strong>certificat court</strong> liant la
+    clé éphémère à cette identité vérifiée.</li>
+  <li>La signature est inscrite dans <strong>Rekor</strong>, un <strong>journal de
+    transparence public, append-only, infalsifiable</strong>.</li>
+</ol>
+<div class="note">
+  <span class="label">docs.sigstore.dev — verbatim</span>
+  « Keyless signing associates <strong>identities</strong>, rather than keys, with an artifact
+  signature. » — et Fulcio « issues <strong>short-lived certificates</strong> binding an
+  ephemeral key to an OpenID Connect identity. »
+</div>
+<p>Dans ta CI, ça tient en deux lignes — et le <code>id-token: write</code> est la permission
+OIDC qui rend le keyless possible :</p>
+<pre><code># ci.yml
+permissions: { id-token: write }   # ← OIDC pour Cosign keyless
+# ...
+cosign sign --yes $IMAGE_PREFIX/$svc:${{ github.sha }}</code></pre>
+
+<h2>3. Les trois pièces de Sigstore (à nommer)</h2>
+<table>
+  <thead><tr><th>Pièce</th><th>Rôle</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Cosign</strong></td><td>l'outil qui signe / vérifie</td></tr>
+    <tr><td><strong>Fulcio</strong></td><td>la CA qui émet le certificat court lié à l'identité OIDC</td></tr>
+    <tr><td><strong>Rekor</strong></td><td>le journal public infalsifiable qui horodate la signature</td></tr>
+  </tbody>
+</table>
+
+<h2>4. Signer ≠ sûr — la limite à assumer</h2>
+<div class="warn">
+  <span class="label">⚠ Le piège classique</span>
+  Une signature valide ne dit <strong>rien</strong> sur la sûreté du contenu. On peut signer
+  parfaitement une image bourrée de CVE ou de code malveillant. Signer répond à « <em>est-ce
+  bien produit par un processus autorisé ?</em> », pas à « <em>est-ce sûr à exécuter ?</em> ».
+  D'où la combinaison : <strong>Trivy (sûreté) + Cosign (origine)</strong> — deux questions
+  différentes, deux outils.
+</div>
+
+<h2>5. SLSA : le cadre qui donne du sens à tout ça</h2>
+<p><strong>SLSA</strong> (« <em>Supply-chain Levels for Software Artifacts</em> », prononcé
+« salsa », version <strong>v1.2</strong>) est un référentiel de niveaux pour sécuriser la
+chaîne de fabrication. Sa notion centrale : la <strong>provenance</strong>.</p>
+<div class="note">
+  <span class="label">slsa.dev — verbatim</span>
+  Provenance = « Verifiable information that can be used to <strong>track an artifact back…
+  to where it came from</strong>. » Et SLSA = « a set of incrementally adoptable guidelines
+  for supply chain security, established by industry consensus. »
+</div>
+<p>Où ta pipeline se place : la <strong>signature Cosign + Rekor</strong> fournit la preuve
+cryptographique d'origine ; l'<strong>épinglage au SHA</strong> (leçon 14) assure la
+traçabilité « cet artefact = ce commit ». Ce sont des briques SLSA. <em>Le citer montre que
+tu sais inscrire ton travail dans un cadre reconnu, pas juste empiler des outils.</em></p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Vous scannez déjà les images avec Trivy. Pourquoi en plus les signer ? »</p>
+  <p><strong>Réponse :</strong> parce que ce sont deux garanties orthogonales. Trivy répond à
+  « cette image est-elle <em>sûre</em> ? » (pas de CVE connue). Cosign répond à « cette image
+  vient-elle bien de <em>ma</em> pipeline et n'a-t-elle pas été <em>altérée</em> depuis ? ».
+  Un attaquant peut pousser une image sans CVE mais malveillante sous mon nom : seul la
+  signature le détecte. Et je le fais en <em>keyless</em> : pas de clé à stocker — c'est
+  l'identité OIDC de ma CI qui sert de preuve, inscrite dans le journal public Rekor. Ça
+  s'inscrit dans le cadre SLSA : prouver la provenance de bout en bout. La signature ne dit
+  pas que l'image est sûre — c'est le rôle du scan — elle dit qu'elle est <em>authentique</em>.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+<div class="quiz" data-answer="3">
+  <div class="q">Que prouve la signature Cosign d'une image, et que ne prouve-t-elle PAS ?</div>
+  <button>Elle prouve que l'image est sans CVE ; elle ne prouve pas qui l'a construite.</button>
+  <button>Elle prouve que l'image est chiffrée ; elle ne prouve pas qu'elle est signée.</button>
+  <button>Elle prouve que l'image est récente ; elle ne prouve pas qu'elle est compatible.</button>
+  <button>Elle prouve origine et intégrité ; elle ne prouve pas que l'image est sûre à exécuter.</button>
+  <div class="explain">Signer prouve l'ORIGINE (produite par ma pipeline) et l'INTÉGRITÉ (non
+  altérée depuis). Elle ne dit RIEN sur la sûreté du contenu : une image signée peut être
+  pleine de CVE. D'où la paire Trivy (sûreté) + Cosign (authenticité).</div>
+</div>
+<div class="quiz" data-answer="0">
+  <div class="q">Qu'est-ce que le mode « keyless » de Cosign évite de gérer ?</div>
+  <button>Une clé privée de signature à stocker, protéger et faire tourner (qui peut fuir).</button>
+  <button>Le besoin de scanner l'image, puisque la signature garantit déjà l'absence de CVE.</button>
+  <button>La connexion réseau vers le registre, la signature étant calculée hors-ligne.</button>
+  <button>Le passage par GitHub Actions, Cosign signant directement depuis le poste local.</button>
+  <div class="explain">Keyless = pas de clé longue durée à gérer. L'identité OIDC de la CI sert
+  de preuve, Fulcio émet un certificat éphémère, Rekor journalise. On élimine le secret de
+  signature — exactement la logique « pas de secret à stocker » vue côté identité (leçon 2).</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (12 min)</span>
+    <strong>Sigstore — « How Cosign works / keyless »</strong> et <strong>slsa.dev</strong>.
+    <a href="https://docs.sigstore.dev/cosign/signing/overview/">docs.sigstore.dev/cosign/signing/overview/</a> ·
+    <a href="https://slsa.dev/spec/v1.2/about">slsa.dev/spec/v1.2/about</a>
+  </div>
+  <nav>
+    <span>← <a href="0012-semgrep-trivy-zap-checkov.html">Leçon 12 — Les outils</a></span>
+    <span><strong>Suivant :</strong> <a href="0014-gitops-argocd-deploy-prod.html">Leçon 14 — GitOps &amp; ArgoCD : la branche deploy/prod</a> →</span>
+  </nav>
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux voir comment on <em>vérifie</em> une signature au déploiement ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

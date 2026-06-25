@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 16 — k3s vs k8s : la distribution légère</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Transverse · Infra — Leçon 16 / ~18</p>
+<h1>k3s vs k8s : pourquoi la distribution légère</h1>
+<p class="subtitle">Ton cluster tourne sur k3s, pas sur Kubernetes « complet ». Question de
+jury facile à anticiper : « c'est quoi la différence, et pourquoi ce choix ? »</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  <a href="../reference/glossaire.html#k3s">k3s</a> est une <strong>distribution Kubernetes
+  certifiée et conforme</strong>, simplement empaquetée en un seul binaire léger. Ce n'est
+  <em>pas</em> un « Kubernetes au rabais » : c'est le <em>même</em> Kubernetes (mêmes API,
+  mêmes manifestes), allégé pour tourner sur un seul petit serveur.</p>
+</div>
+
+<h2>1. Ce que k3s change (et ne change pas)</h2>
+<table>
+  <thead><tr><th></th><th>Kubernetes « vanilla »</th><th>k3s (Rancher / SUSE)</th></tr></thead>
+  <tbody>
+    <tr><td>API &amp; manifestes</td><td colspan="2" style="text-align:center"><strong>identiques</strong> — un YAML k8s marche sur k3s</td></tr>
+    <tr><td>Installation</td><td class="no">multi-composants, complexe</td><td class="ok">un binaire, une commande</td></tr>
+    <tr><td>Empreinte</td><td class="no">lourde (plusieurs nœuds, etcd…)</td><td class="ok">légère (1 process, SQLite par défaut)</td></tr>
+    <tr><td>Cible</td><td>grands clusters, prod massive</td><td>edge, IoT, dev, <strong>petit VPS</strong></td></tr>
+    <tr><td>Conformité CNCF</td><td class="ok">oui</td><td class="ok">oui (distribution certifiée)</td></tr>
+  </tbody>
+</table>
+<p>Concrètement, ton rôle Ansible installe k3s en <em>une ligne</em> :</p>
+<pre><code># infra/ansible/roles/k3s/tasks/main.yml
+curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644</code></pre>
+<p>Comparé au montage d'un cluster k8s complet (control plane multi-composants, etcd, CNI à
+choisir…), c'est le jour et la nuit — et parfaitement adapté à un <strong>lab sur un seul VPS
+Hetzner facturé à l'heure</strong>.</p>
+
+<h2>2. Pourquoi c'est le bon choix pour TON contexte</h2>
+<ul>
+  <li><strong>Un seul serveur</strong> : tu n'as pas besoin de la haute disponibilité
+    multi-nœuds d'un k8s de prod. k3s tient sur une machine.</li>
+  <li><strong>Jetable / reproductible</strong> : un binaire = un cluster monté en minutes,
+    détruit aussi vite. Idéal pour un lab qu'on <code>apply</code>/<code>destroy</code>.</li>
+  <li><strong>Compatibilité totale</strong> : tes manifestes, Istio, ArgoCD, les CRDs… tout
+    marche comme sur un k8s standard. Tu n'apprends rien de « spécial k3s ».</li>
+  <li><strong>Économie</strong> : moins de RAM/CPU consommés par le control plane = plus pour
+    tes services et le mesh sur un petit VPS.</li>
+</ul>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Vous utilisez k3s et non Kubernetes. Votre projet est-il vraiment
+  représentatif d'un vrai déploiement Kubernetes ? »</p>
+  <p><strong>Réponse :</strong> oui, parce que k3s <em>est</em> Kubernetes — une distribution
+  certifiée conforme CNCF, avec les mêmes API et les mêmes manifestes. Mon Istio, mon ArgoCD,
+  mes <code>AuthorizationPolicy</code> tournent exactement comme sur un cluster vanilla ; je
+  pourrais porter le tout sur EKS ou GKE sans changer une ligne de YAML. k3s ne retire pas des
+  fonctionnalités, il <em>repackage</em> Kubernetes en un binaire léger : il remplace etcd par
+  SQLite par défaut et réduit l'empreinte, ce qui est idéal pour un lab sur un VPS unique,
+  jetable et facturé à l'heure. Pour une prod massive multi-nœuds, je prendrais du k8s managé —
+  mais le modèle de sécurité que je démontre est rigoureusement le même.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+<div class="quiz" data-answer="2">
+  <div class="q">Quelle affirmation sur k3s est correcte ?</div>
+  <button>k3s est un fork incompatible de Kubernetes avec ses propres API et manifestes.</button>
+  <button>k3s retire les fonctionnalités de sécurité de Kubernetes pour gagner en légèreté.</button>
+  <button>k3s est une distribution Kubernetes conforme, repackagée en un binaire léger.</button>
+  <button>k3s ne peut faire tourner ni Istio ni ArgoCD car il lui manque les CRDs requis.</button>
+  <div class="explain">k3s EST Kubernetes : distribution certifiée CNCF, mêmes API et
+  manifestes. Il repackage en un binaire léger (SQLite au lieu d'etcd par défaut, empreinte
+  réduite) sans retirer de fonctionnalités. Ton YAML, Istio et ArgoCD marchent à l'identique.</div>
+</div>
+<div class="quiz" data-answer="0">
+  <div class="q">Pourquoi k3s est-il adapté à ton lab précisément ?</div>
+  <button>Un seul serveur, cluster jetable monté/détruit en minutes, compat totale k8s.</button>
+  <button>Parce que k3s chiffre automatiquement tout le trafic, rendant Istio inutile ici.</button>
+  <button>Parce que k3s est le seul à supporter SPIFFE et le mTLS automatique nativement.</button>
+  <button>Parce que k3s impose la haute disponibilité multi-nœuds requise par la soutenance.</button>
+  <div class="explain">k3s tient sur un VPS unique, se monte/détruit vite (parfait pour un lab
+  apply/destroy facturé à l'heure), consomme peu, et reste 100% compatible k8s. Les autres
+  réponses sont fausses (le chiffrement vient d'Istio, pas de k3s ; pas de HA imposée).</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (6 min)</span>
+    <strong>k3s — « What is k3s? »</strong> (lightweight certified Kubernetes).
+    <a href="https://docs.k3s.io/">docs.k3s.io</a>
+  </div>
+  <nav>
+    <span>← <a href="0015-terraform-vs-ansible.html">Leçon 15 — Terraform vs Ansible</a></span>
+    <span><strong>Suivant :</strong> <a href="0017-ssh-juste-a-temps.html">Leçon 17 — SSH juste-à-temps : le firewall dynamique</a> →</span>
+  </nav>
+  <p class="ask">Ton enseignant, c'est l'agent. Une question sur etcd vs SQLite ? Demande-lui.</p>
+</footer>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

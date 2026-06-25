@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 7 — Data plane vs control plane</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 2 · Multi-langage — Leçon 7 / ~18</p>
+<h1>Data plane vs control plane</h1>
+<p class="subtitle">Tu as vu un proxy (Envoy) à côté d'Analytics. Pour comprendre comment
+un mesh généralise ça, il faut une distinction simple et puissante : qui <em>fait passer</em>
+le trafic, et qui <em>décide des règles</em>.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  <strong>Data plane</strong> = les proxies qui voient passer le trafic réel et l'exécutent
+  (chiffrer, router, autoriser). <strong>Control plane</strong> = le cerveau central qui
+  <em>configure</em> tous ces proxies (leur distribue identités, règles, routes). Le contrôle
+  décide ; les données exécutent.
+</div>
+
+<h2>1. Deux rôles, à ne jamais confondre</h2>
+
+<table>
+  <thead><tr><th></th><th>Data plane</th><th>Control plane</th></tr></thead>
+  <tbody>
+    <tr><td>Rôle</td><td>Faire passer le trafic</td><td>Configurer ceux qui le font passer</td></tr>
+    <tr><td>Voit-il les requêtes réelles ?</td><td class="ok">Oui (chaque paquet)</td><td class="no">Non (il pilote, il ne route pas)</td></tr>
+    <tr><td>Où s'exécute-t-il ?</td><td>Un proxy par pod (partout)</td><td>Quelques pods centraux</td></tr>
+    <tr><td>Si on l'arrête…</td><td>le trafic s'arrête</td><td>le trafic continue (avec la dernière config)</td></tr>
+  </tbody>
+</table>
+
+<p>L'analogie qui colle : le <strong>control plane est la tour de contrôle</strong> d'un
+aéroport (elle ne transporte aucun passager, elle donne les instructions) ; le
+<strong>data plane, ce sont les avions</strong> (ils transportent réellement, en suivant
+les instructions).</p>
+
+<h2>2. Tu as déjà vu un data plane — sans control plane</h2>
+
+<p>Reviens à la leçon 6. Ton Envoy devant Analytics, c'était un <strong>data plane</strong> :
+il voyait le trafic, terminait le mTLS, transmettait l'identité. Mais qui le configurait ?</p>
+
+<div class="key">
+  <span class="label">Le déclic</span>
+  <strong>Toi.</strong> À la main. Dans une ConfigMap YAML écrite à la main
+  (<code>analytics.yaml</code>, ~100 lignes de config Envoy). Tu étais le control plane
+  humain. Et il aurait fallu recommencer ce travail manuel pour chaque service — c'est
+  précisément ce qui ne scale pas.
+</div>
+
+<p>Un <a href="../reference/glossaire.html#service-mesh">service mesh</a>, c'est exactement
+ça : on <strong>automatise le control plane</strong>. Au lieu d'écrire la config Envoy à la
+main, un composant central la génère et la pousse à <em>tous</em> les proxies, en continu.</p>
+
+<h2>3. Comment Istio (v2) incarne les deux plans</h2>
+
+<p>En v2, le mapping est net — et c'est du vocabulaire que le jury attend :</p>
+
+<pre><code>            CONTROL PLANE                         DATA PLANE
+         ┌──────────────┐              ┌──────────────────────────┐
+         │   istiod      │  config →    │  Envoy   Envoy   Envoy   │
+         │ (le cerveau)  │  (xDS)       │  gateway orders  payments │
+         └──────────────┘              └──────────────────────────┘
+          distribue :                    chaque proxy injecté :
+          - identités SPIFFE             - termine le mTLS
+          - AuthorizationPolicy          - applique la policy (403)
+          - routes                       - produit les métriques</code></pre>
+
+<ul>
+  <li><strong><a href="../reference/glossaire.html#istio">istiod</a></strong> = le control
+    plane. Il émet les identités SPIFFE (dérivées du ServiceAccount, rappel leçon 3),
+    compile tes <code>AuthorizationPolicy</code> et les pousse aux proxies.</li>
+  <li>Les <strong>Envoy injectés</strong> = le data plane. Un par pod, ils font le travail
+    de la leçon 4 (handshake mTLS) et de la leçon 5 (le 403), mais configurés
+    automatiquement par istiod — plus de ConfigMap à écrire.</li>
+</ul>
+
+<div class="note">
+  <span class="label">Le lien avec ta migration</span>
+  En v1, ton <em>data plane</em> existait (le code Go + l'Envoy d'Analytics) mais le
+  <em>control plane était manuel</em> (toi, recompilant et éditant des YAML). La v2 n'invente
+  pas le data plane — elle <strong>ajoute un control plane automatique</strong> (istiod) et
+  généralise le data plane à tous les services. C'est tout le saut v1→v2 en une phrase.
+</div>
+
+<h2>4. Pourquoi cette séparation est une bonne idée</h2>
+
+<ul>
+  <li><strong>Robustesse</strong> : si istiod tombe, les proxies continuent avec leur
+    dernière config. Le trafic ne s'arrête pas parce que le cerveau redémarre.</li>
+  <li><strong>Cohérence</strong> : une seule source de règles, poussée partout. Pas de proxy
+    « oublié » avec une vieille config.</li>
+  <li><strong>Séparation des responsabilités</strong> : les développeurs écrivent des
+    <em>règles</em> déclaratives (control plane) ; l'exécution (data plane) est uniforme et
+    invisible pour eux.</li>
+</ul>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Si votre control plane <code>istiod</code> tombe en panne, votre boutique
+  s'arrête-t-elle ? »</p>
+  <p><strong>Réponse :</strong> non. Le control plane <em>configure</em> les proxies, il ne
+  fait pas transiter le trafic. Les Envoy du data plane gardent en mémoire leur dernière
+  configuration et continuent à router, chiffrer et autoriser. Ce qui s'arrête, c'est la
+  <em>propagation des changements</em> : un nouveau pod ne recevra pas sa config, une policy
+  modifiée ne se propagera pas — mais l'existant tourne. C'est exactement pour ça qu'on
+  sépare les deux plans : la panne du cerveau ne paralyse pas le corps.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="2">
+  <div class="q">Quelle est la différence entre data plane et control plane ?</div>
+  <button>Le data plane gère le trafic externe, le control plane le trafic interne au cluster.</button>
+  <button>Le data plane tourne sur le serveur, le control plane tourne chez le fournisseur cloud.</button>
+  <button>Le data plane fait passer le trafic ; le control plane configure ceux qui le font passer.</button>
+  <button>Le data plane chiffre les données, le control plane les déchiffre côté destinataire.</button>
+  <div class="explain">Data plane = les proxies qui voient et exécutent le trafic réel
+  (chiffrer/router/autoriser). Control plane = le cerveau qui leur distribue la config
+  (identités, policies, routes). La tour de contrôle vs les avions. Istio : istiod (control)
+  configure les Envoy (data).</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <div class="q">Dans ta v1, qui jouait le rôle de « control plane » pour l'Envoy d'Analytics ?</div>
+  <button>Le SPIRE Server, qui poussait automatiquement la config TLS à chaque proxy.</button>
+  <button>Toi, à la main : la config Envoy était une ConfigMap YAML écrite manuellement.</button>
+  <button>Le SPIRE Agent, qui générait dynamiquement la ConfigMap Envoy à chaque démarrage.</button>
+  <button>Kubernetes lui-même, via un contrôleur natif dédié à la configuration des sidecars.</button>
+  <div class="explain">En v1, le data plane (Envoy) existait, mais le control plane c'était
+  TOI : tu écrivais la config Envoy à la main dans une ConfigMap. C'est ce travail manuel,
+  à refaire par service, qu'un control plane automatique (istiod en v2) supprime.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (8 min)</span>
+    <strong>Istio — « Architecture »</strong> : la séparation data plane / control plane et
+    le rôle de <code>istiod</code>, schéma officiel à l'appui.
+    <a href="https://istio.io/latest/docs/ops/deployment/architecture/">istio.io/latest/docs/ops/deployment/architecture/</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0006-multi-langage-envoy-sidecar.html">Leçon 6 — Envoy en sidecar</a></span>
+    <span><strong>Acte 3 :</strong> <a href="0008-service-mesh-ce-quil-remplace.html">Leçon 8 — Le service mesh : ce qu'il remplace dans le code (v1→v2)</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux comprendre xDS (comment istiod parle
+  aux proxies), ou enchaîner sur le mesh ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

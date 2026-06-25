@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 5 — Authentifié ≠ autorisé : la policy /pay</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 1 · Identité — Leçon 5 / ~18 · clôt l'Acte 1</p>
+<h1>Authentifié ≠ autorisé : le cœur de ta démo</h1>
+<p class="subtitle">Tout l'Acte 1 menait ici. L'identité (qui ?) est résolue. Reste la
+deuxième question, séparée : <strong>a-t-elle le droit ?</strong> C'est <em>le</em> moment
+de ta soutenance où le 403 tombe et prouve le zero-trust.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  La Gateway a une identité <strong>parfaitement valide</strong> (mTLS réussi). Et pourtant
+  elle se prend un <span class="tag deny">403</span> sur <code>/pay</code>. Pourquoi ?
+  Parce que <strong>l'autorisation est une décision distincte de l'authentification</strong> :
+  être prouvé n'est pas être permis. C'est la démonstration vivante que « être dans le
+  réseau » — ou même « avoir une identité » — ne donne aucun droit par défaut.
+</div>
+
+<h2>1. Deux questions, jamais une seule</h2>
+
+<p>On boucle la boucle ouverte en leçon 1 :</p>
+
+<table>
+  <thead><tr><th>Question</th><th>Nom</th><th>Résolu par</th><th>Leçons</th></tr></thead>
+  <tbody>
+    <tr><td><em>Qui</em> appelle ?</td><td><a href="../reference/glossaire.html#authn-authz">AuthN</a></td><td>SPIFFE + SVID + attestation + mTLS</td><td>2 · 3 · 4</td></tr>
+    <tr><td>A-t-il le <em>droit</em> ?</td><td><a href="../reference/glossaire.html#authn-authz">AuthZ</a></td><td>Une <strong>policy</strong> explicite</td><td><strong>5 (ici)</strong></td></tr>
+  </tbody>
+</table>
+
+<p>Le piège que tend le jury : croire qu'un mTLS réussi « ouvre la porte ». Non. Le mTLS
+prouve <em>qui</em>. La policy décide <em>quoi</em>. Tu peux être authentifié et refusé.</p>
+
+<h2>2. La règle, en français d'abord</h2>
+
+<div class="key">
+  <span class="label">La règle métier (ton fil rouge)</span>
+  <strong>Seul Orders peut déclencher un paiement</strong> (route <code>/pay</code>).
+  La Gateway peut orchestrer une commande, Catalog peut exposer des produits — mais aucun
+  des deux ne doit pouvoir appeler <code>/pay</code> directement.
+</div>
+
+<p>Conséquence concrète, mise en scène dans ta démo :</p>
+<pre><code>Orders   → Payments /pay   <span style="color:#1f5e3a">200 — autorisé</span>   (Orders est dans la liste)
+Gateway  → Payments /pay   <span style="color:#7a1f1f">403 — REFUSÉ</span>     (authentifiée, mais pas autorisée)
+Catalog  → Payments /pay   <span style="color:#7a1f1f">403 — REFUSÉ</span>     (idem)</code></pre>
+
+<p>La Gateway de la démo a même une route <code>/api/forbidden</code> dont le seul but est de
+<em>provoquer ce 403</em> pour le montrer à l'écran. Le refus est une fonctionnalité, pas un bug.</p>
+
+<h2>3. La même règle, deux endroits : v1 (code) vs v2 (plateforme)</h2>
+
+<p>Voici le cœur de ton récit d'évolution. La <strong>règle ne change pas</strong> entre v1
+et v2. Ce qui change, c'est <strong>où elle vit</strong>.</p>
+
+<h3>v1 — la policy est dans le code Go (<code>guard()</code>)</h3>
+<pre><code>// services/payments/main.go (v1, tag v1-manual-mtls)
+var policy = map[string][]string{
+    "/pay":    {ordersID},     // spiffe://example.org/ns/shop/sa/orders
+    "/_calls": {gatewayID},
+}
+
+func guard(route string, ...) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        caller := callerID(r)                              // lu dans le cert client (mTLS)
+        allowed := slices.Contains(policy[route], caller)  // ← LA décision d'autorisation
+        if !allowed {
+            writeJSON(w, http.StatusForbidden, ...)        // 403, émis par L'APP
+            return
+        }
+        h(w, r, caller)
+    }
+}</code></pre>
+<p>Ici la requête <strong>atteint l'application</strong>, qui lit l'identité puis décide. Le
+403 est renvoyé par <em>ton code</em>.</p>
+
+<h3>v2 — la policy est déclarative, dans Kubernetes (Istio)</h3>
+<pre><code># k8s/workloads/authz.yaml (v2)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata: { name: payments-authz, namespace: shop }
+spec:
+  selector: { matchLabels: { app: payments } }
+  action: ALLOW
+  rules:
+    - from: [ { source: { principals: ["cluster.local/ns/shop/sa/orders"] } } ]
+      to:   [ { operation: { paths: ["/pay"] } } ]</code></pre>
+<p>Ici la requête de la Gateway <strong>n'atteint JAMAIS ton code</strong> : le
+<a href="../reference/glossaire.html#sidecar">sidecar</a> de Payments la rejette en 403
+<em>avant</em> l'app. Et le principe Istio est puissant : <strong>dès qu'une policy ALLOW
+cible un service, tout ce qui n'est pas explicitement autorisé est refusé</strong> (deny
+par défaut).</p>
+
+<table>
+  <thead><tr><th></th><th>v1 — dans le code</th><th>v2 — dans la plateforme</th></tr></thead>
+  <tbody>
+    <tr><td>Où vit la règle ?</td><td>Binaire Go (<code>policy</code> map)</td><td>YAML dans Git (<code>authz.yaml</code>)</td></tr>
+    <tr><td>Qui renvoie le 403 ?</td><td>L'application</td><td>Le sidecar, <strong>avant</strong> l'app</td></tr>
+    <tr><td>Modifier la règle</td><td class="no">Recompiler + redéployer</td><td class="ok"><code>kubectl apply</code> / git</td></tr>
+    <tr><td>Auditer la règle</td><td class="no">Lire le code source</td><td class="ok">Lire un manifeste déclaratif</td></tr>
+    <tr><td>Rejouée dans</td><td colspan="2" style="text-align:center">…la <em>même</em> règle métier : « <code>/pay</code> réservé à orders »</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <span class="label">La phrase qui résume ton projet entier</span>
+  « La sécurité passe <strong>du code à la plateforme</strong>. En v1, chaque service portait
+  sa propre logique d'autorisation ; en v2, la politique sort du binaire, entre dans Git, et
+  devient auditable et modifiable sans recompiler. » <span style="color:var(--muted);font-size:0.88rem;">
+  (C'est littéralement le commentaire en tête de ton <code>authz.yaml</code>.)</span>
+</div>
+
+<h2>4. Pourquoi « deny par défaut » est le bon réglage</h2>
+
+<p>En v2, tu n'écris que des règles <em>ALLOW</em>. Tout le reste est implicitement refusé.
+C'est le principe du <strong>moindre privilège</strong> : on n'autorise que l'explicitement
+nécessaire, et un oubli penche du côté sûr (refus), jamais du côté ouvert. L'opposé serait
+catastrophique : si l'ajout d'un service ouvrait tout par défaut, chaque oubli serait une
+faille.</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Si la Gateway est compromise par un attaquant, votre policy l'empêche
+  d'appeler <code>/pay</code>. Mais qu'est-ce qui empêche l'attaquant de simplement se faire
+  passer pour Orders ? »</p>
+  <p><strong>Réponse :</strong> c'est là que les deux couches travaillent ensemble. Pour
+  « être » Orders aux yeux de la policy, il faut présenter le <strong>SVID d'Orders</strong>
+  au handshake mTLS — donc posséder sa <em>clé privée</em>, que SPIRE/le mesh n'a délivrée
+  qu'au vrai pod Orders après attestation (leçon 3). Un attaquant sur la Gateway possède la
+  clé de <em>la Gateway</em>, pas celle d'Orders. La policy l'identifie comme
+  <code>gateway</code> → 403. <strong>L'autorisation est aussi solide que l'authentification
+  qui la précède</strong> : l'une sans l'autre ne vaut rien, les deux ensemble font le
+  zero-trust.</p>
+</div>
+
+<div class="jury">
+  <span class="label">Question de jury (bonus)</span>
+  <p class="q">« Pourquoi avoir déplacé l'autorisation dans Istio en v2 ? Le code marchait. »</p>
+  <p><strong>Réponse :</strong> trois raisons. (1) <em>Auditabilité</em> : la règle est un
+  YAML dans Git, pas enfouie dans un binaire. (2) <em>Agilité</em> : la changer ne demande
+  pas de recompiler/redéployer le service. (3) <em>Universalité</em> : la même mécanique
+  s'applique à un service Go, Node, Python… sans réécrire la logique de sécurité dans chaque
+  langage. C'est le problème du multi-langage — l'Acte 2 — qui a motivé ce déplacement.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="2">
+  <div class="q">La Gateway appelle <code>/pay</code>, le mTLS réussit, et elle reçoit un 403. Pourquoi ?</div>
+  <button>Son certificat client a expiré pendant le handshake, donc le mTLS l'a rejetée.</button>
+  <button>Le réseau k3s bloque tout appel direct vers Payments depuis un autre service.</button>
+  <button>Elle est authentifiée mais pas dans la liste autorisée sur /pay : AuthZ ≠ AuthN.</button>
+  <button>La Gateway n'a pas de SVID valide car SPIRE ne lui en délivre jamais aucun.</button>
+  <div class="explain">Le mTLS réussit = elle EST authentifiée (identité valide). Mais
+  l'autorisation est une décision séparée : la policy réserve <code>/pay</code> à orders, et
+  la Gateway n'y est pas → 403. C'est LA démonstration « authentifié ≠ autorisé », le cœur
+  de la soutenance.</div>
+</div>
+
+<div class="quiz" data-answer="1">
+  <div class="q">Entre la v1 (guard en Go) et la v2 (AuthorizationPolicy Istio), qu'est-ce qui change ?</div>
+  <button>La règle métier change : en v2 la Gateway gagne le droit d'appeler /pay aussi.</button>
+  <button>L'endroit où vit la règle : du code applicatif vers un manifeste déclaratif Git.</button>
+  <button>Le protocole change : la v1 utilise du mTLS, la v2 passe en HTTP clair partout.</button>
+  <button>Le niveau de sécurité baisse : en v2 le sidecar laisse passer puis filtre l'app.</button>
+  <div class="explain">La règle métier est IDENTIQUE (« /pay réservé à orders »). Ce qui
+  change, c'est qu'elle sort du binaire pour devenir un YAML auditable dans Git, appliqué par
+  le sidecar AVANT l'app (et non par l'app elle-même). « La sécurité passe du code à la
+  plateforme. »</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (10 min)</span>
+    <strong>Istio — « Authorization Policy »</strong> : la doc officielle du modèle
+    ALLOW/deny-par-défaut, des <code>principals</code> et des <code>paths</code>.
+    <a href="https://istio.io/latest/docs/reference/config/security/authorization-policy/">istio.io/latest/docs/reference/config/security/authorization-policy/</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0004-mtls-le-handshake.html">Leçon 4 — mTLS</a></span>
+    <span><strong>Acte 1 bouclé.</strong> Suivant : <a href="0006-multi-langage-envoy-sidecar.html">Leçon 6 — le problème du multi-langage (Analytics/Node + Envoy)</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Acte 1 terminé : tu veux une pause active
+  « mode jury » sur tout l'Acte 1 (leçons 1→5), ou on attaque l'Acte 2 ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

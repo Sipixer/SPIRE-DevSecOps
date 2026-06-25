@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 15 — Terraform vs Ansible : qui fait quoi</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Transverse · Infra — Leçon 15 / ~18</p>
+<h1>Terraform vs Ansible : provisionner ≠ configurer</h1>
+<p class="subtitle">Ton infra utilise les deux. Le jury va demander « pourquoi pas un seul ? ».
+La réponse tient en une distinction nette : l'un <em>crée</em> la machine, l'autre la
+<em>configure</em>.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  <strong>Terraform provisionne</strong> l'infrastructure (le serveur, le réseau, le
+  firewall) — il <em>crée ce qui n'existe pas</em>. <strong>Ansible configure</strong> ce
+  qui existe (installer k3s, ArgoCD, durcir SSH) — il <em>agit à l'intérieur</em> de la
+  machine. Provisionnement vs configuration : deux étapes, deux outils.</p>
+</div>
+
+<h2>1. La frontière exacte, dans ton projet</h2>
+<table>
+  <thead><tr><th></th><th>Terraform</th><th>Ansible</th></tr></thead>
+  <tbody>
+    <tr><td>Question</td><td><em>Quelles ressources existent ?</em></td><td><em>Que contient la machine ?</em></td></tr>
+    <tr><td>Chez toi</td><td>serveur Hetzner, firewall, clé SSH, tunnel Cloudflare</td><td>k3s, observabilité, Istio/Kiali, ArgoCD, durcissement</td></tr>
+    <tr><td>Modèle</td><td><strong>déclaratif</strong> (état désiré, calcule le diff)</td><td><strong>procédural</strong> idempotent (tâches dans l'ordre)</td></tr>
+    <tr><td>Paradigme</td><td>« infrastructure immuable »</td><td>« configuration de l'existant »</td></tr>
+  </tbody>
+</table>
+<p>Le passage de l'un à l'autre est visible dans ton workflow <code>infra.yml</code> :
+Terraform sort l'<strong>IP du serveur</strong>, qu'Ansible prend en entrée
+(<code>-i "${ip},"</code>) pour s'y connecter en SSH et le configurer. Terraform pose la
+scène ; Ansible joue dessus.</p>
+
+<h2>2. Pourquoi pas un seul outil ?</h2>
+<p>On <em>pourrait</em> tout faire avec l'un ou l'autre — mais chacun excelle dans son
+domaine et est maladroit dans l'autre :</p>
+<ul>
+  <li><strong>Terraform</strong> est imbattable pour gérer le <em>cycle de vie</em> des
+    ressources cloud (créer, modifier, <strong>détruire</strong> proprement en suivant un
+    état). Mais configurer finement l'intérieur d'un OS n'est pas son métier.</li>
+  <li><strong>Ansible</strong> est imbattable pour exécuter des étapes idempotentes sur une
+    machine (installer, copier, redémarrer un service). Mais il n'a pas la notion d'<em>état</em>
+    d'infrastructure ni la destruction propre de Terraform.</li>
+</ul>
+<p>La combinaison est un <strong>standard de l'industrie</strong> : Terraform pour le
+provisionnement, un outil de configuration (Ansible) pour le reste. Ce n'est pas une
+redondance, c'est une séparation des responsabilités.</p>
+
+<h2>3. Idempotence — le mot à placer</h2>
+<p>Ansible est <strong>idempotent</strong> : rejouer le playbook produit le même résultat
+sans tout refaire (s'il voit que k3s est déjà installé, il ne réinstalle pas). Terraform
+l'est aussi via son <em>state</em> : il calcule le <em>diff</em> entre le désiré et le réel.
+C'est ce qui rend ton déploiement <strong>reproductible from scratch</strong> — tu l'as
+prouvé en rejouant <code>infra.yml apply</code> sur un cluster neuf.</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Vous utilisez Terraform <em>et</em> Ansible. N'est-ce pas redondant ? Pourquoi
+  pas tout en Terraform, ou tout en Ansible ? »</p>
+  <p><strong>Réponse :</strong> ce sont deux métiers différents. Terraform <em>provisionne</em>
+  l'infrastructure — il crée le serveur Hetzner, le firewall, la clé SSH, et sait les
+  détruire proprement en suivant un état déclaratif. Ansible <em>configure</em> la machine une
+  fois qu'elle existe : il installe k3s, Istio, ArgoCD et durcit le système, par étapes
+  idempotentes. Les faire faire l'un par l'autre serait possible mais maladroit : Terraform
+  est mauvais pour configurer finement un OS, Ansible n'a pas la gestion d'état et la
+  destruction propre de Terraform. La passe de relais est explicite dans ma CI : Terraform
+  produit l'IP du serveur, Ansible la consomme pour s'y connecter. C'est la séparation
+  provisionnement / configuration — un standard, pas une redondance.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+<div class="quiz" data-answer="3">
+  <div class="q">Quelle est la division du travail entre Terraform et Ansible dans ton infra ?</div>
+  <button>Terraform installe k3s et ArgoCD ; Ansible crée le serveur et le firewall Hetzner.</button>
+  <button>Terraform et Ansible font la même chose ; on garde les deux pour la redondance.</button>
+  <button>Terraform configure l'OS ; Ansible gère l'état déclaratif des ressources cloud.</button>
+  <button>Terraform provisionne (serveur, firewall, clé) ; Ansible configure (k3s, Istio, ArgoCD).</button>
+  <div class="explain">Terraform PROVISIONNE l'infra (crée le serveur, le réseau, le firewall,
+  la clé SSH, le tunnel) ; Ansible CONFIGURE la machine existante (installe k3s, observabilité,
+  Istio, ArgoCD, durcit SSH). Provisionnement ≠ configuration : deux métiers, deux outils.</div>
+</div>
+<div class="quiz" data-answer="0">
+  <div class="q">Que signifie « idempotent » pour Ansible ?</div>
+  <button>Rejouer le playbook donne le même état final sans refaire ce qui est déjà fait.</button>
+  <button>Chaque exécution du playbook recrée entièrement la machine depuis zéro à neuf.</button>
+  <button>Le playbook ne peut être exécuté qu'une seule fois, ensuite il se verrouille.</button>
+  <button>Les tâches s'exécutent dans un ordre aléatoire pour répartir la charge système.</button>
+  <div class="explain">Idempotent = rejouer produit le même résultat sans tout refaire (si k3s
+  est déjà là, on ne réinstalle pas). C'est ce qui rend le déploiement reproductible from
+  scratch, ce que tu as prouvé en rejouant infra.yml sur un cluster neuf.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (8 min)</span>
+    <strong>HashiCorp — « Terraform vs. configuration management »</strong> (provisioning vs configuration).
+    <a href="https://developer.hashicorp.com/terraform/intro/vs/chef-puppet">developer.hashicorp.com/terraform/intro/vs</a>
+  </div>
+  <nav>
+    <span>← <a href="0014-gitops-argocd-deploy-prod.html">Leçon 14 — GitOps &amp; ArgoCD</a></span>
+    <span><strong>Suivant :</strong> <a href="0016-k3s-vs-k8s.html">Leçon 16 — k3s vs k8s : la distrib légère</a> →</span>
+  </nav>
+  <p class="ask">Ton enseignant, c'est l'agent. Une question sur le state Terraform ? Demande-lui.</p>
+</footer>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

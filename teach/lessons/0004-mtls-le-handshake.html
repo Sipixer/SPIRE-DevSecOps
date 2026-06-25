@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 4 — mTLS : le handshake qui transporte l'identité</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 1 · Identité — Leçon 4 / ~18</p>
+<h1>mTLS : comment l'identité voyage et se vérifie</h1>
+<p class="subtitle">Tu as une identité (SPIFFE ID), un document signé (SVID), et SPIRE qui
+le délivre après attestation. Mais comment cette identité <em>voyage</em> sur le réseau et
+est <em>vérifiée à chaque connexion</em> ? C'est le rôle du mTLS.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Le HTTPS classique vérifie <strong>une seule</strong> partie : le serveur prouve son
+  identité au client. Le <a href="../reference/glossaire.html#mtls">mTLS</a> (mutual TLS)
+  vérifie <strong>les deux</strong> : le client présente <em>aussi</em> son certificat.
+  C'est <em>pendant le handshake</em>, par cryptographie, que l'identité de l'appelant est
+  prouvée — pas via un header que l'on pourrait forger.
+</div>
+
+<h2>1. TLS « normal » vs mTLS : qui prouve quoi ?</h2>
+
+<p>Quand ton navigateur visite un site en HTTPS, une seule chose est vérifiée :
+<strong>le serveur est-il bien celui qu'il prétend ?</strong> (son certificat, signé par
+une autorité connue). Le serveur, lui, ne sait pas qui tu es — tu pourrais être n'importe
+qui. C'est normal pour le web public.</p>
+
+<p>Mais entre <em>tes</em> services, ça ne suffit pas : Payments a besoin de savoir si
+l'appelant est <em>Orders</em> ou un imposteur. D'où le <strong>mutual</strong> TLS :</p>
+
+<table>
+  <thead><tr><th></th><th>TLS classique (HTTPS)</th><th>mTLS (mutual)</th></tr></thead>
+  <tbody>
+    <tr><td>Le serveur prouve son identité</td><td class="ok">Oui</td><td class="ok">Oui</td></tr>
+    <tr><td>Le client prouve son identité</td><td class="no">Non</td><td class="ok">Oui</td></tr>
+    <tr><td>Le serveur sait <em>qui</em> appelle</td><td class="no">Non</td><td class="ok">Oui (depuis le cert client)</td></tr>
+    <tr><td>Cas d'usage</td><td>Web public (navigateur)</td><td>Service-à-service interne</td></tr>
+  </tbody>
+</table>
+
+<h2>2. Le handshake, en 4 temps</h2>
+
+<p>Quand Orders ouvre une connexion vers Payments, voici ce qui se passe <em>avant</em>
+qu'une seule donnée applicative circule :</p>
+
+<pre><code>1. Orders → Payments : "Bonjour" + voici MON certificat (SVID orders)
+2. Payments → Orders : voici MON certificat (SVID payments)
+3. Chacun VÉRIFIE le cert de l'autre :
+   - signé par la racine du trust domain ? (chaîne de confiance)
+   - pas expiré ? (TTL court, rappel leçon 3)
+   - prouve-t-il la POSSESSION de la clé privée ? (challenge crypto)
+4. Si OK des deux côtés → canal chiffré établi. Sinon → connexion refusée.</code></pre>
+
+<p>Deux propriétés en sortent, et ce sont elles qu'il faut savoir nommer :</p>
+<ul>
+  <li><strong>Chiffrement</strong> : tout le trafic est chiffré (confidentialité).</li>
+  <li><strong>Authentification mutuelle</strong> : chacun a prouvé son identité par
+    <em>possession de la clé privée</em> — pas en l'affirmant. C'est ça, l'infalsifiabilité
+    dont on parle depuis la leçon 2.</li>
+</ul>
+
+<div class="key">
+  <span class="label">Pourquoi un header ne suffirait pas</span>
+  On pourrait imaginer qu'Orders envoie juste un en-tête <code>X-Caller: orders</code>.
+  Mais <strong>n'importe qui peut écrire ce header</strong>. Le mTLS est plus fort :
+  l'identité est liée à la <em>connexion elle-même</em>, prouvée par une clé privée que
+  seul Orders possède. On ne <em>déclare</em> pas son identité, on la <em>prouve</em>.
+</div>
+
+<h2>3. Dans <em>ton</em> code v1 — les deux côtés</h2>
+
+<p>Ton service Orders est à la fois <strong>client</strong> (il appelle Payments) et
+<strong>serveur</strong> (il reçoit la Gateway). Regarde les deux configs, tirées du
+SVID obtenu via la Workload API (la même <code>source</code> sert aux deux) :</p>
+
+<h3>Côté client (Orders appelle Payments)</h3>
+<pre><code>// services/orders/main.go (v1)
+paymentsSPIFFE, _ := spiffeid.FromString("spiffe://example.org/ns/shop/sa/payments")
+
+// MTLSClientConfig : je présente mon SVID ET je n'accepte le serveur QUE
+// s'il prouve être exactement payments (AuthorizeID).
+clientTLS := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeID(paymentsSPIFFE))
+client := &http.Client{Transport: &http.Transport{TLSClientConfig: clientTLS}}</code></pre>
+
+<h3>Côté serveur (Payments reçoit Orders)</h3>
+<pre><code>// services/payments/main.go (v1)
+td, _ := spiffeid.TrustDomainFromString("example.org")
+
+// MTLSServerConfig : j'exige un certificat client, et j'accepte tout
+// MEMBRE du trust domain (le filtrage fin par route vient après, dans guard()).
+tlsConfig := tlsconfig.MTLSServerConfig(source, source, tlsconfig.AuthorizeMemberOf(td))
+server := &http.Server{Addr: ":8443", Handler: mux, TLSConfig: tlsConfig}</code></pre>
+
+<p>Note les <strong>deux niveaux d'autorisation</strong> déjà visibles ici :</p>
+<ul>
+  <li><code>AuthorizeID(...)</code> — Orders, en client, refuse de parler à autre chose que
+    Payments exactement (anti-usurpation du serveur).</li>
+  <li><code>AuthorizeMemberOf(td)</code> — Payments, en serveur, accepte <em>tout membre du
+    trust domain</em> au handshake… puis filtre <em>par route</em> dans le code (la
+    fonction <code>guard()</code> — c'est la leçon 5, l'autorisation fine).</li>
+</ul>
+
+<h2>4. Après le handshake : lire qui a appelé</h2>
+
+<p>Une fois le mTLS établi, le certificat client est disponible côté serveur. C'est là
+qu'on lit le SPIFFE ID de l'appelant — depuis le <strong>certificat vérifié</strong>, pas
+depuis un header :</p>
+
+<pre><code>// l'identité vient du cert client présenté pendant le handshake, déjà vérifié
+id, _ := spiffeid.FromURI(r.TLS.PeerCertificates[0].URIs[0])
+// → spiffe://example.org/ns/shop/sa/orders</code></pre>
+
+<div class="note">
+  <span class="label">Le pont v1 → v2</span>
+  En v1, <strong>ton code Go fait tout ça à la main</strong> (construire les configs TLS,
+  lire le cert). En v2, le <a href="../reference/glossaire.html#service-mesh">service mesh</a>
+  Istio fait <em>exactement le même handshake mTLS</em>, mais <strong>hors de ton code</strong> :
+  les proxies s'en chargent, et l'app redevient du HTTP clair. L'identité, elle, arrive via
+  le header <a href="../reference/glossaire.html#xfcc">XFCC</a> posé par le proxy
+  <em>après</em> vérification. Même sécurité, déplacée du code vers la plateforme. C'est tout
+  l'Acte 3.
+</div>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Le mTLS chiffre et authentifie. Donc une fois le handshake réussi, l'appelant
+  a le droit de faire ce qu'il veut sur le service, non ? »</p>
+  <p><strong>Réponse :</strong> non — c'est précisément le piège. Le handshake mTLS répond à
+  « <em>qui</em> es-tu ? » (AuthN) et au passage chiffre le canal. Il ne dit <strong>rien</strong>
+  du « as-tu le <em>droit</em> ? » (AuthZ). Dans mon code, le serveur accepte au handshake
+  <em>tout membre du trust domain</em> (<code>AuthorizeMemberOf</code>) ; le filtrage fin
+  « cette route, cet appelant » se fait <em>après</em>, séparément. C'est exactement pour ça
+  que la Gateway — authentifiée, mTLS parfait — se prend quand même un 403 sur
+  <code>/pay</code>. <strong>Authentifié ≠ autorisé.</strong> <em>(C'est l'objet de la
+  leçon 5.)</em></p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="3">
+  <div class="q">Quelle est la différence essentielle entre TLS classique (HTTPS) et mTLS ?</div>
+  <button>Le mTLS utilise une clé plus longue (4096 bits) là où HTTPS se limite à 2048 bits.</button>
+  <button>Le mTLS chiffre le trafic alors que le TLS classique ne fait qu'authentifier.</button>
+  <button>Le mTLS fonctionne sur le port 8443 tandis que le HTTPS reste sur le port 443.</button>
+  <button>En mTLS le client présente aussi son certificat ; en HTTPS seul le serveur le fait.</button>
+  <div class="explain">Le « mutual » = les DEUX parties présentent un certificat. En HTTPS
+  classique, seul le serveur prouve son identité (le navigateur reste anonyme). Le mTLS
+  ajoute la preuve d'identité du CLIENT — c'est ce qui permet à Payments de savoir que
+  l'appelant est bien Orders.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <div class="q">Pourquoi lit-on l'identité de l'appelant dans le certificat client, et pas dans un header HTTP ?</div>
+  <button>Le certificat est prouvé par possession de la clé privée ; un header est forgeable.</button>
+  <button>Le header HTTP est limité à 256 caractères, trop court pour contenir un SPIFFE ID.</button>
+  <button>Le certificat client est compressé alors qu'un en-tête HTTP voyage toujours en clair.</button>
+  <button>Le header HTTP n'est lisible qu'après déchiffrement, ce qui ralentit fortement l'appel.</button>
+  <div class="explain">Un header <code>X-Caller: orders</code> peut être écrit par n'importe
+  qui — aucune preuve. Le certificat client, lui, est validé pendant le handshake : présenter
+  l'identité <code>orders</code> exige la clé privée correspondante, que seul le vrai Orders
+  possède. L'identité est liée à la connexion, infalsifiable.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (survol, 10 min)</span>
+    <strong>Cloudflare — « What is mutual TLS (mTLS)? »</strong> : la meilleure explication
+    visuelle TLS vs mTLS et du handshake.
+    <a href="https://www.cloudflare.com/learning/access-management/what-is-mutual-tls/">cloudflare.com/learning/access-management/what-is-mutual-tls/</a>
+    <br><span style="color:var(--muted);font-size:0.86rem;">Pour la spec brute : RFC 8446 (TLS 1.3), § sur l'authentification client.</span>
+  </div>
+
+  <nav>
+    <span>← <a href="0003-spire-attestation-trust-domain.html">Leçon 3 — Attestation</a></span>
+    <span><strong>Suivant :</strong> <a href="0005-authentifie-nest-pas-autorise.html">Leçon 5 — Authentifié ≠ autorisé : la policy <code>/pay</code> (le fil rouge)</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux voir le détail du challenge
+  cryptographique (preuve de possession), comprendre la chaîne de confiance, ou enchaîner ?
+  Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

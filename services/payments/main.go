@@ -1,13 +1,4 @@
-// Payments est un service sensible. En v2, l'identité et l'autorisation sont
-// portées par le service mesh (Linkerd) :
-//  1. le mTLS est automatique entre proxies (l'app parle HTTP clair en local) ;
-//  2. l'autorisation par route est déclarée hors du code, dans des
-//     AuthorizationPolicy Linkerd (voir k8s/workloads/authz.yaml). Une requête
-//     qui n'est pas autorisée n'atteint JAMAIS ce code : le proxy la rejette.
-//
-// L'app garde un journal d'appels pour le front : l'identité de l'appelant est
-// désormais fournie par Linkerd via l'en-tête l5d-client-id (non falsifiable,
-// posé par le proxy après vérification du mTLS).
+// Payments : service sensible, /pay réservé à Orders (mTLS Istio, autorisation via AuthorizationPolicy).
 package main
 
 import (
@@ -66,15 +57,10 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, mux)) // nosemgrep: go.lang.security.audit.net.use-tls.use-tls
 }
 
-// logged journalise l'appel puis délègue. Il ne décide plus de l'autorisation :
-// c'est le proxy Linkerd qui l'a déjà fait en amont (AuthorizationPolicy). Toute
-// requête qui arrive ici a donc été autorisée — d'où Allowed: true. Les refus
-// sont visibles dans Linkerd Viz (réponses 403 émises par le proxy), pas ici.
+// logged journalise l'appel puis délègue (l'autorisation a déjà été faite par le sidecar).
 func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := callerID(r)
-		// /_calls est une route d'introspection (lecture du journal par le front) ;
-		// on ne la journalise pas pour ne pas noyer les vrais appels métier.
 		if route != "/_calls" {
 			logbook.record(callEntry{Caller: caller, Route: route, Allowed: true, Timestamp: time.Now()})
 		}
@@ -82,9 +68,7 @@ func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Re
 	}
 }
 
-// callerID lit l'identité de l'appelant dans l'en-tête X-Forwarded-Client-Cert
-// (XFCC) posé par le sidecar Istio après vérification du mTLS. Le champ URI
-// contient le SPIFFE ID de l'appelant (spiffe://cluster.local/ns/shop/sa/<sa>).
+// callerID lit le SPIFFE ID de l'appelant dans le header XFCC posé par le sidecar Istio.
 func callerID(r *http.Request) string {
 	xfcc := r.Header.Get("X-Forwarded-Client-Cert")
 	if xfcc == "" {
@@ -96,7 +80,6 @@ func callerID(r *http.Request) string {
 	return "(inconnu)"
 }
 
-// xfccURI extrait le champ URI=spiffe://... du header XFCC d'Istio.
 var xfccURI = regexp.MustCompile(`URI=([^;,]+)`)
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

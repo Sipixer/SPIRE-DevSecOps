@@ -1,8 +1,4 @@
-// Orders gère les commandes. Il reçoit la Gateway et appelle Payments. En v2,
-// le mTLS entre services est automatique (mesh Linkerd) : Orders parle HTTP
-// clair, et le proxy chiffre/authentifie pour lui. L'autorisation par route
-// (qui peut appeler /order, qui peut appeler /pay) est déclarée hors du code
-// dans des AuthorizationPolicy Linkerd (voir k8s/workloads/authz.yaml).
+// Orders : reçoit la Gateway, appelle Payments (mTLS Istio, autorisation via AuthorizationPolicy).
 package main
 
 import (
@@ -46,8 +42,6 @@ func (l *callLog) snapshot() []callEntry {
 }
 
 func main() {
-	// HTTP clair : le mTLS vers Payments est ajouté de façon transparente par le
-	// proxy Linkerd. Plus de client TLS à construire à la main.
 	paymentsURL := getenv("PAYMENTS_URL", "http://payments.shop.svc.cluster.local:8080/pay")
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -80,8 +74,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, mux)) // nosemgrep: go.lang.security.audit.net.use-tls.use-tls
 }
 
-// logged journalise l'appel puis délègue. L'autorisation est déjà faite par le
-// proxy Linkerd en amont : toute requête qui arrive ici a été autorisée.
+// logged journalise l'appel puis délègue (l'autorisation a déjà été faite par le sidecar).
 func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller := callerID(r)
@@ -92,9 +85,7 @@ func logged(route string, logbook *callLog, h func(http.ResponseWriter, *http.Re
 	}
 }
 
-// callerID lit l'identité de l'appelant dans l'en-tête X-Forwarded-Client-Cert
-// (XFCC) posé par le sidecar Istio après vérification du mTLS. Le champ URI
-// contient le SPIFFE ID de l'appelant (spiffe://cluster.local/ns/shop/sa/<sa>).
+// callerID lit le SPIFFE ID de l'appelant dans le header XFCC posé par le sidecar Istio.
 func callerID(r *http.Request) string {
 	xfcc := r.Header.Get("X-Forwarded-Client-Cert")
 	if xfcc == "" {
@@ -106,7 +97,6 @@ func callerID(r *http.Request) string {
 	return "(inconnu)"
 }
 
-// xfccURI extrait le champ URI=spiffe://... du header XFCC d'Istio.
 var xfccURI = regexp.MustCompile(`URI=([^;,]+)`)
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

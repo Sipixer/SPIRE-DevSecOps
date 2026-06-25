@@ -8,10 +8,8 @@ resource "hcloud_ssh_key" "main" {
 resource "hcloud_firewall" "main" {
   name = "${var.server_name}-fw"
 
-  # Règle SSH JUSTE-À-TEMPS : présente uniquement quand allowed_ssh_cidr est
-  # renseigné (la CI y met l'IP du runner le temps d'Ansible). Au repos la
-  # variable vaut "" → aucune règle 22 → port fermé. C'est le cœur du zero-trust :
-  # SSH n'existe au pare-feu que pour l'IP qui en a besoin, le temps du job.
+  # SSH juste-à-temps : règle 22 présente seulement quand allowed_ssh_cidr est
+  # renseigné (la CI y met l'IP du runner le temps d'Ansible). "" = port fermé.
   dynamic "rule" {
     for_each = var.allowed_ssh_cidr == "" ? [] : [var.allowed_ssh_cidr]
     content {
@@ -22,10 +20,7 @@ resource "hcloud_firewall" "main" {
     }
   }
 
-  # Zero-trust total : AUCUN port web entrant. Tout le trafic HTTP (ArgoCD,
-  # Grafana, boutique) passe par le tunnel Cloudflare, qui établit une connexion
-  # SORTANTE — donc rien à ouvrir en entrée. Au repos, ce firewall ne laisse
-  # passer que SSH juste-à-temps (et seulement pendant un provisioning).
+  # Aucun port web entrant : tout le HTTP passe par le tunnel Cloudflare (sortant).
 }
 
 resource "hcloud_server" "main" {

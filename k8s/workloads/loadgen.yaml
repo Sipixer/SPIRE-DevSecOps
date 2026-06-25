@@ -1,18 +1,6 @@
-# Générateur de trafic ("load generator") : simule un client externe réaliste
-# qui utilise la boutique en continu. Il tape sur la Gateway (le point d'entrée
-# navigateur), exactement comme le ferait un vrai utilisateur — il n'appelle
-# JAMAIS les services internes en direct. Ça garde le code applicatif 100% prod
-# (aucune logique de démo dedans) tout en animant Kiali et Grafana en permanence.
-#
-# Il est dans le namespace shop, donc meshé : il apparaît dans Kiali comme la
-# source du trafic (loadgen -> gateway -> orders/catalog/payments/analytics).
-#
-# Profil pondéré réaliste (sur ~10 itérations) :
-#   ~50% /api/products  (browsing catalogue)
-#   ~30% /api/order     (commande : gateway -> orders -> payments, mTLS)
-#   ~10% /api/event     (analytics)
-#   ~10% /api/forbidden (gateway -> /pay : REFUSÉ 403 par l'AuthorizationPolicy,
-#                        garde le scénario zero-trust visible en rouge dans Kiali)
+# Load generator : tape sur la Gateway en continu (comme un vrai client) pour
+# animer Kiali/Grafana. Profil sur ~10 itérations : ~50% /api/products,
+# ~30% /api/order, ~10% /api/event, ~10% /api/forbidden (403 zero-trust attendu).
 apiVersion: v1
 kind: ServiceAccount
 metadata: { name: loadgen, namespace: shop }
@@ -34,7 +22,6 @@ spec:
             requests: { cpu: 10m, memory: 16Mi }
             limits: { cpu: 100m, memory: 64Mi }
           env:
-            # URL de la Gateway (point d'entrée client) et délai entre requêtes.
             - { name: GATEWAY, value: "http://gateway.shop.svc.cluster.local:8080" }
             - { name: SLEEP, value: "2" }
           command: ["/bin/sh", "-c"]
@@ -52,8 +39,7 @@ spec:
                 elif [ "$r" -lt 9 ]; then
                   curl -fsS -o /dev/null --max-time 8 -X POST "$GATEWAY/api/event" || true
                 else
-                  # Scénario zero-trust : la Gateway tente /pay (réservé à Orders).
-                  # Le mesh renvoie 403 ; -f ferait échouer curl, donc on l'omet ici.
+                  # 403 attendu (zero-trust) : pas de -f sinon curl échouerait.
                   curl -sS -o /dev/null --max-time 8 -X POST "$GATEWAY/api/forbidden" || true
                 fi
                 sleep "$SLEEP"

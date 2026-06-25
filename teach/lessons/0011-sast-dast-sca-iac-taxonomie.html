@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 11 — SAST / DAST / SCA / IaC-scan : la taxonomie</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Transverse · Pipeline — Leçon 11 / ~18</p>
+<h1>SAST / DAST / SCA / IaC-scan : qui trouve quoi</h1>
+<p class="subtitle">Ta pipeline empile quatre familles d'analyse de sécurité. Le jury va
+vouloir t'entendre les distinguer : <em>chacune voit ce que les autres ne voient pas</em>.
+Voici la carte.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Aucun outil ne voit tout. On combine quatre angles : <strong>ton code</strong> (SAST),
+  <strong>tes dépendances</strong> (SCA), <strong>ton infrastructure déclarée</strong>
+  (IaC-scan) et <strong>ton application qui tourne</strong> (DAST). C'est de la
+  <em>défense en profondeur appliquée à la chaîne de fabrication</em> : chaque famille
+  rattrape les angles morts des autres.</p>
+</div>
+
+<h2>1. Les quatre familles, en une ligne chacune</h2>
+
+<table>
+  <thead><tr><th>Sigle</th><th>Analyse…</th><th>Code exécuté ?</th><th>Trouve typiquement</th></tr></thead>
+  <tbody>
+    <tr><td><a href="../reference/glossaire.html#sast"><strong>SAST</strong></a></td><td>ton <strong>code source</strong></td><td class="no">Non (statique)</td><td>injection, secret en dur, mauvais usage crypto</td></tr>
+    <tr><td><a href="../reference/glossaire.html#sca"><strong>SCA</strong></a></td><td>tes <strong>dépendances</strong> &amp; images</td><td class="no">Non</td><td>CVE connues dans une lib / une image de base</td></tr>
+    <tr><td><strong>IaC-scan</strong></td><td>ton <strong>infra déclarée</strong> (Terraform…)</td><td class="no">Non</td><td>bucket public, port ouvert, chiffrement manquant</td></tr>
+    <tr><td><a href="../reference/glossaire.html#dast"><strong>DAST</strong></a></td><td>ton <strong>app en exécution</strong></td><td class="ok">Oui (dynamique)</td><td>header manquant, faille visible de l'extérieur</td></tr>
+  </tbody>
+</table>
+
+<h2>2. L'axe qui structure tout : statique vs dynamique</h2>
+
+<p>La grande ligne de partage, celle que le jury attend :</p>
+<ul>
+  <li><strong>Statique</strong> (SAST, SCA, IaC) — on <em>lit</em> sans exécuter. Tôt dans le
+    cycle, rapide, exhaustif sur ce qu'on lit. Mais aveugle au comportement réel (faux
+    positifs : du code « dangereux » jamais atteint).</li>
+  <li><strong>Dynamique</strong> (DAST) — on <em>exécute</em> et on attaque comme un vrai
+    attaquant (boîte noire). Voit le comportement réel, peu de faux positifs. Mais plus tard
+    (il faut une app déployée) et ne voit que ce qui est exposé.</li>
+</ul>
+
+<div class="note">
+  <span class="label">La métaphore qui marche à l'oral</span>
+  SAST/SCA/IaC = <strong>relire les plans</strong> du bâtiment avant de construire. DAST =
+  <strong>essayer d'ouvrir les portes</strong> une fois le bâtiment debout. Les deux sont
+  nécessaires : un plan correct mal réalisé, ou une porte oubliée, n'apparaît qu'au test
+  réel.
+</div>
+
+<h2>3. La carte appliquée à <em>ta</em> pipeline</h2>
+
+<p>Ton <code>.github/workflows/ci.yml</code> couvre les quatre familles. Mets un nom de
+catégorie sur chaque étape — c'est exactement ce que le jury veut t'entendre faire :</p>
+
+<pre><code>iac-lint :  tflint + <span style="color:#7a1f1f">Checkov</span>   → IaC-scan   (l'infra Terraform)
+sast     :  <span style="color:#7a1f1f">Semgrep</span>            → SAST       (le code Go)
+image    :  <span style="color:#7a1f1f">Trivy</span>              → SCA        (les images / CVE)
+(exposé) :  <span style="color:#7a1f1f">ZAP baseline</span>       → DAST       (l'app qui tourne)</code></pre>
+
+<p>Et l'ordre n'est pas un hasard — c'est le principe du <strong>« shift-left »</strong> :</p>
+
+<div class="key">
+  <span class="label">Shift-left</span>
+  Déplacer la sécurité <strong>le plus tôt possible</strong> dans le cycle. Les analyses
+  statiques (qui ne demandent rien d'exécuté) passent en premier : si ton code ou ton infra
+  a une faille évidente, on casse le build <em>avant même</em> de construire l'image ou de
+  déployer. Plus un défaut est trouvé tôt, moins il coûte cher à corriger.
+</div>
+
+<h2>4. Pourquoi « bloquant » et pas « avertissement »</h2>
+
+<p>Détail crucial de ta pipeline : ces étapes <strong>cassent le build</strong> (exit-code ≠ 0),
+elles n'émettent pas un simple warning. C'est volontaire — le commentaire en tête de ton
+<code>ci.yml</code> le dit : <em>« c'est une porte de qualité, pas un avertissement »</em>.</p>
+
+<p>La logique : un avertissement qu'on peut ignorer <em>sera</em> ignoré (« on corrigera plus
+tard »). Une <strong>quality gate</strong> bloquante force la décision <em>maintenant</em> :
+soit on corrige, soit on accepte explicitement le risque (ex. <code>nosemgrep</code>,
+<code>ignore-unfixed</code>). La sécurité devient une condition de livraison, pas une
+option.</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Vous avez du SAST et du SCA. Pourquoi en plus du DAST ? N'est-ce pas
+  redondant — ils cherchent tous des vulnérabilités ? »</p>
+  <p><strong>Réponse :</strong> non, ils regardent des choses <em>disjointes</em>. Le SAST lit
+  <em>mon</em> code (une injection que j'aurais écrite). Le SCA regarde le code que je
+  <em>n'ai pas écrit</em> — mes dépendances et l'image de base — pour les CVE connues. Le
+  DAST, lui, ignore le code : il <em>attaque l'application qui tourne</em> et voit ce qu'un
+  attaquant verrait réellement, y compris des défauts de configuration ou des interactions que
+  l'analyse statique ne peut pas déduire. Un exemple : un header de sécurité manquant
+  n'apparaît ni dans le code source ni dans les dépendances — seul le DAST, qui interroge l'app
+  réelle, le détecte. C'est de la défense en profondeur : chaque famille couvre l'angle mort
+  des autres.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="3">
+  <div class="q">Quelle est la différence fondamentale entre SAST et DAST ?</div>
+  <button>Le SAST analyse les dépendances tierces, le DAST analyse le code que tu as écrit.</button>
+  <button>Le SAST tourne en production, le DAST tourne uniquement en environnement de test.</button>
+  <button>Le SAST cherche des CVE connues, le DAST cherche des secrets codés en dur.</button>
+  <button>Le SAST lit le code sans l'exécuter ; le DAST attaque l'application en exécution.</button>
+  <div class="explain">SAST = statique = lit le code source sans l'exécuter (tôt, exhaustif,
+  des faux positifs). DAST = dynamique = exécute et attaque l'app comme un vrai attaquant
+  (plus tard, comportement réel, peu de faux positifs). Relire les plans vs essayer d'ouvrir
+  les portes.</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <div class="q">Dans ta pipeline, à quelle famille appartient Trivy, et que regarde-t-il ?</div>
+  <button>SCA : il scanne les images et dépendances pour repérer des CVE connues.</button>
+  <button>SAST : il lit le code source Go à la recherche de patterns dangereux.</button>
+  <button>DAST : il attaque l'application déployée pour trouver des failles exposées.</button>
+  <button>IaC-scan : il vérifie la configuration Terraform de l'infrastructure cloud.</button>
+  <div class="explain">Trivy = SCA (Software Composition Analysis) : il scanne les images
+  conteneur et leurs dépendances pour des CVE connues, et casse le build sur HIGH/CRITICAL.
+  Dans ta pipeline : Semgrep=SAST, Checkov=IaC-scan, ZAP=DAST, Trivy=SCA.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (10 min)</span>
+    <strong>OWASP — DevSecOps Guideline / catégories de tests</strong> : définitions de
+    référence SAST/DAST/SCA et leur place dans la CI.
+    <a href="https://owasp.org/www-project-devsecops-guideline/">owasp.org/www-project-devsecops-guideline/</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0010-spire-vs-mesh-qui-emet-lidentite.html">Leçon 10 — SPIRE vs mesh</a></span>
+    <span><strong>Suivant :</strong> <a href="0012-semgrep-trivy-zap-checkov.html">Leçon 12 — Semgrep / Trivy / ZAP / Checkov : outil par outil</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux qu'on détaille un outil en
+  particulier, ou enchaîner sur la comparaison outil par outil ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

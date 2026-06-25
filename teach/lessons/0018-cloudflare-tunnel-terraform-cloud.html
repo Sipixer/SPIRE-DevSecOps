@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 18 — Tunnel Cloudflare + Terraform Cloud : zéro port entrant</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Transverse · Infra — Leçon 18 / 18 · dernière leçon</p>
+<h1>Tunnel Cloudflare &amp; Terraform Cloud : zéro port, zéro secret exposé</h1>
+<p class="subtitle">La dernière brique zero-trust : exposer la boutique <em>sans ouvrir un
+seul port entrant</em>, et gérer l'infra <em>sans jamais confier les secrets sensibles à
+GitHub</em>.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Le <strong>tunnel Cloudflare</strong> établit une connexion <em>sortante</em> du cluster
+  vers Cloudflare : aucun port HTTP entrant à ouvrir sur le serveur. Et
+  <strong>Terraform Cloud</strong> exécute Terraform à distance, où sont stockés les secrets
+  (token Hetzner, clé SSH) — GitHub ne les voit jamais. Deux façons de <em>réduire la surface
+  d'exposition</em> à presque zéro.</p>
+</div>
+
+<h2>1. Le tunnel : sortant, donc rien à ouvrir</h2>
+<p>Rappelle la leçon 17 : ton firewall n'ouvre <strong>aucun port web entrant</strong>. Alors
+comment le navigateur atteint-il la boutique ? Le connecteur <code>cloudflared</code>, dans le
+cluster, ouvre une connexion <strong>sortante</strong> vers le réseau Cloudflare. Le trafic
+public arrive sur Cloudflare, qui le fait redescendre <em>par ce tunnel déjà établi</em>.</p>
+<pre><code># infra/terraform/cloudflare.tf — 4 hostnames routés par le tunnel
+ingress:
+  - shop.…    → http://gateway.shop.svc.cluster.local:8080      (public)
+  - argocd.…  → http://argocd-server.argocd…:80                 (derrière Access login)
+  - grafana.… → http://…grafana…:80                             (derrière Access login)
+  - kiali.…   → http://kiali.istio-system…:20001                (derrière Access login)</code></pre>
+<div class="note">
+  <span class="label">Pourquoi c'est puissant</span>
+  Un port entrant ouvert = une surface scannable et attaquable. Ici il n'y en a <strong>aucun</strong>
+  pour le web : le firewall Hetzner ne laisse passer, au repos, que… rien (et SSH juste-à-temps).
+  Le commentaire de ton <code>main.tf</code> le dit : « <em>Zero-trust total : AUCUN port web
+  entrant.</em> » L'exposition se fait par une connexion sortante, contrôlée, terminée TLS par
+  Cloudflare.
+</div>
+
+<h2>2. Cloudflare Access : login devant les UI sensibles</h2>
+<p>Le tunnel route 4 hostnames, mais ils ne sont pas tous publics : la boutique
+(<code>shop</code>) l'est ; ArgoCD, Grafana et Kiali sont <strong>derrière Cloudflare
+Access</strong> (authentification avant d'atteindre le service). Ainsi tes consoles d'admin
+ne sont jamais joignables anonymement, même via le tunnel.</p>
+
+<h2>3. Terraform Cloud : les secrets ne touchent jamais GitHub</h2>
+<p>Terraform doit créer un serveur Hetzner → il lui faut le <strong>token API Hetzner</strong>
+(très sensible). Où le mettre ? <em>Pas</em> dans les secrets GitHub. À la place, Terraform
+s'exécute en mode <strong>Remote</strong> sur <strong>Terraform Cloud</strong>, où sont stockés
+le <code>hcloud_token</code> et la clé publique SSH.</p>
+<table>
+  <thead><tr><th>Secret</th><th>Où il vit</th><th>GitHub le voit ?</th></tr></thead>
+  <tbody>
+    <tr><td>Token API Hetzner</td><td>Terraform Cloud (workspace)</td><td class="ok">Non</td></tr>
+    <tr><td>Token tunnel Cloudflare</td><td>output TF → Secret k8s (masqué <code>::add-mask::</code>)</td><td class="ok">Non (jamais committé)</td></tr>
+    <tr><td>Jeton API Terraform Cloud</td><td>Secret GitHub (<code>TF_API_TOKEN</code>)</td><td>Oui — mais c'est le <em>seul</em></td></tr>
+    <tr><td>Clé privée SSH du serveur</td><td>Secret GitHub (<code>SSH_PRIVATE_KEY</code>)</td><td>Oui (dédiée, jetable)</td></tr>
+  </tbody>
+</table>
+<p>GitHub ne détient que le strict minimum : de quoi <em>parler à</em> Terraform Cloud, et la
+clé SSH dédiée. Le secret le plus puissant (le token qui peut créer/détruire de
+l'infrastructure facturée) reste hors de portée de la CI. C'est le <strong>moindre
+privilège</strong> appliqué aux secrets.</p>
+
+<h2>4. Le fil rouge, jusqu'au bout</h2>
+<p>Tu vois que <strong>le même principe</strong> traverse tout le projet, des services à
+l'infra :</p>
+<ul>
+  <li>Services : pas de confiance par emplacement réseau → identité + autorisation (Acte 1-3).</li>
+  <li>Accès admin : pas de port SSH ouvert en permanence → juste-à-temps (leçon 17).</li>
+  <li>Exposition web : pas de port entrant → tunnel sortant (ici).</li>
+  <li>Secrets : pas de secret puissant chez un tiers qui n'en a pas besoin → Terraform Cloud (ici).</li>
+</ul>
+<p><strong>Zero-trust = réduire la confiance implicite partout.</strong> C'est l'unité de ta
+soutenance : une seule idée, déclinée du code au pare-feu.</p>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Pourquoi un tunnel Cloudflare plutôt que d'ouvrir simplement les ports 80/443
+  avec un reverse-proxy classique ? »</p>
+  <p><strong>Réponse :</strong> pour ne pas exposer de surface entrante du tout. Un 80/443
+  ouvert, c'est un point scannable et attaquable en permanence, et il faut y gérer le TLS, les
+  certificats, le durcissement du proxy. Avec le tunnel, c'est mon cluster qui initie une
+  connexion <em>sortante</em> vers Cloudflare : le firewall n'a aucun port web entrant à
+  ouvrir, Cloudflare termine le TLS et filtre en amont, et je peux mettre Access (login)
+  devant mes consoles d'admin sans les exposer. C'est cohérent avec tout le reste du projet :
+  je réduis la surface d'attaque au minimum. Idem pour Terraform Cloud — le token Hetzner, qui
+  peut créer et détruire de l'infra facturée, n'est jamais confié à GitHub ; seul un jeton pour
+  parler à Terraform Cloud l'est. Moindre privilège, du service jusqu'au secret.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+<div class="quiz" data-answer="0">
+  <div class="q">Comment la boutique est-elle accessible sans ouvrir de port web entrant ?</div>
+  <button>Un connecteur dans le cluster ouvre une connexion sortante vers Cloudflare (tunnel).</button>
+  <button>Le firewall Hetzner ouvre les ports 80/443 uniquement pour les IP de Cloudflare.</button>
+  <button>k3s expose nativement les services sur Internet via un LoadBalancer intégré.</button>
+  <button>ArgoCD pousse le trafic entrant vers la Gateway après l'avoir authentifié en mTLS.</button>
+  <div class="explain">cloudflared, dans le cluster, établit une connexion SORTANTE vers
+  Cloudflare ; le trafic public redescend par ce tunnel déjà ouvert. Donc AUCUN port entrant à
+  ouvrir sur le firewall — la surface d'attaque entrante est nulle. Cloudflare termine le TLS
+  et met Access (login) devant les consoles d'admin.</div>
+</div>
+<div class="quiz" data-answer="2">
+  <div class="q">Pourquoi le token API Hetzner est-il dans Terraform Cloud et non dans GitHub ?</div>
+  <button>Parce que GitHub ne supporte pas les secrets de plus de 64 caractères comme ce token.</button>
+  <button>Parce que Terraform Cloud chiffre les secrets alors que GitHub les stocke en clair.</button>
+  <button>Pour que le secret le plus puissant (créer/détruire l'infra) ne soit jamais exposé à la CI.</button>
+  <button>Parce que Terraform refuse par conception de lire un token depuis un secret GitHub.</button>
+  <div class="explain">Moindre privilège appliqué aux secrets : le token Hetzner peut créer et
+  DÉTRUIRE de l'infra facturée. On le garde dans Terraform Cloud (exécution Remote) ; GitHub ne
+  détient que le jeton pour PARLER à Terraform Cloud + la clé SSH dédiée. Un runner GitHub
+  compromis n'a pas accès au token le plus dangereux.</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (8 min)</span>
+    <strong>Cloudflare — « Cloudflare Tunnel »</strong> (connexion sortante, zéro port entrant)
+    + <strong>HashiCorp — Terraform Cloud remote execution</strong>.
+    <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/">developers.cloudflare.com/cloudflare-one/connections/connect-networks/</a>
+  </div>
+  <nav>
+    <span>← <a href="0017-ssh-juste-a-temps.html">Leçon 17 — SSH juste-à-temps</a></span>
+    <span><strong>🎓 Cours terminé — 18/18.</strong> Prochaine étape : le quiz final de synthèse.</span>
+  </nav>
+  <p class="ask">Ton enseignant, c'est l'agent. Tu as parcouru les 18 leçons : demande-lui le
+  <strong>quiz final mode jury</strong> quand tu te sens prêt.</p>
+</footer>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

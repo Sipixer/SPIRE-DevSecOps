@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leçon 6 — Le problème du multi-langage : Envoy en sidecar</title>
+<link rel="stylesheet" href="../assets/teach.css">
+</head>
+<body>
+
+<p class="kicker">Acte 2 · Multi-langage — Leçon 6 / ~18</p>
+<h1>Le problème du multi-langage : Envoy en sidecar</h1>
+<p class="subtitle">L'Acte 1 marchait… pour du Go. Mais ta boutique a un service en
+Node.js (Analytics). Faut-il réécrire toute la logique SPIFFE/mTLS en JavaScript ? La
+réponse ouvre la voie au mesh.</p>
+
+<div class="key">
+  <span class="label">Le seul point à retenir</span>
+  Plutôt que de réimplémenter SPIFFE/mTLS dans chaque langage, on <strong>sort la sécurité
+  de l'application</strong> et on la confie à un <a href="../reference/glossaire.html#envoy">proxy
+  Envoy</a> placé <a href="../reference/glossaire.html#sidecar">à côté</a> du service. L'app
+  parle HTTP clair <em>en local</em> ; Envoy porte le mTLS <em>vers le monde</em>. Analytics
+  ne sait même pas que SPIFFE existe.
+</div>
+
+<h2>1. Le problème, posé honnêtement</h2>
+
+<p>En v1, tes services Go font tout eux-mêmes : <code>workloadapi.NewX509Source</code>,
+<code>MTLSClientConfig</code>, lecture du cert… C'est la librairie
+<a href="../reference/glossaire.html#svid"><code>go-spiffe/v2</code></a> qui rend ça possible.
+Élégant — <strong>tant qu'on reste en Go</strong>.</p>
+
+<p>Arrive <strong>Analytics, écrit en Node.js</strong>. Deux mauvaises options :</p>
+<ul>
+  <li><strong>Réécrire toute la logique SPIFFE/mTLS en JavaScript.</strong> Il faudrait
+    trouver (ou écrire) l'équivalent de <code>go-spiffe</code> pour Node, le maintenir, le
+    re-tester… puis recommencer pour le prochain service en Python, en Rust, etc.
+    <span class="tag deny">ne scale pas</span></li>
+  <li><strong>Laisser Analytics sans mTLS.</strong> Il devient le maillon faible : un
+    service en clair dans un monde zero-trust. <span class="tag deny">inacceptable</span></li>
+</ul>
+
+<div class="note">
+  <span class="label">⚠ Le point que le jury teste (et que beaucoup ratent)</span>
+  La sécurité d'Analytics en v1 <strong>n'est pas absente</strong> : Analytics <em>a bien
+  du mTLS</em>. Simplement, ce n'est pas <em>lui</em> qui le porte — c'est un Envoy à côté.
+  Ne jamais dire « Analytics n'avait pas de mTLS en v1 ». Dire : « Analytics déléguait son
+  mTLS à un sidecar Envoy ».
+</div>
+
+<h2>2. La solution : le pattern sidecar</h2>
+
+<p>Un <strong>sidecar</strong> est un second conteneur dans le <em>même pod</em>, qui partage
+le réseau local (loopback) avec l'application. On lui confie une responsabilité transverse —
+ici, tout le réseau sécurisé :</p>
+
+<pre><code>┌─────────────── Pod analytics ───────────────┐
+│                                              │
+│   Envoy (sidecar)            Analytics (app) │
+│   écoute :8443  ───loopback──→  écoute :9090 │
+│   mTLS SPIFFE                   HTTP clair    │
+│   ▲                                          │
+└───┼──────────────────────────────────────────┘
+    │ mTLS (depuis la Gateway, via le mesh)
+</code></pre>
+
+<ul>
+  <li><strong>Envoy</strong> écoute sur <code>:8443</code>, fait tout le mTLS, vérifie
+    l'identité du pair.</li>
+  <li>Une fois le pair authentifié, Envoy relaie en <strong>HTTP clair</strong> vers
+    <code>127.0.0.1:9090</code> — l'app Node, qui n'est joignable que par Envoy.</li>
+  <li>Envoy <strong>transmet l'identité vérifiée</strong> à l'app via un header.</li>
+</ul>
+
+<h2>3. Dans <em>ton</em> code v1 — la preuve</h2>
+
+<p>L'app Node n'a <strong>aucune ligne de cryptographie</strong>. Elle écoute en clair sur
+la loopback et lit l'identité dans un header posé par Envoy :</p>
+
+<pre><code>// services/analytics/main.js (v1) — commentaire d'en-tête, mot pour mot :
+// « Analytics : app Node.js derrière Envoy, qui porte le mTLS et transmet
+//   l'identité du pair via header. L'app écoute en clair : seule Envoy l'atteint. »
+
+const HOST = "127.0.0.1";   // ← jamais exposé hors du pod
+const PORT = 9090;          // ← HTTP clair, Envoy seul y accède
+
+function callerFromHeaders(headers) {
+  const direct = headers["x-spiffe-id"];
+  if (direct) return direct;
+  const xfcc = headers["x-forwarded-client-cert"];   // XFCC standard
+  if (xfcc) { const m = xfcc.match(/URI=([^;,]+)/i); if (m) return m[1]; }
+  return "unknown";
+}</code></pre>
+
+<p>Et c'est Envoy qui fait le vrai travail — il récupère les SVID auprès du SPIRE Agent via
+<strong>SDS</strong> (Secret Discovery Service), exactement comme tes services Go via la
+Workload API, mais côté proxy :</p>
+
+<pre><code># k8s/workloads/analytics.yaml (v1) — la ConfigMap Envoy
+listeners:
+  - name: mtls_listener
+    address: { socket_address: { address: 0.0.0.0, port_value: 8443 } }  # mTLS entrant
+    # ...route vers le cluster "analytics_app" (127.0.0.1:9090)...
+    transport_socket:
+      name: envoy.transport_sockets.tls          # ← Envoy termine le mTLS ici
+# le SVID vient du SPIRE Agent par gRPC sur son socket :
+#   path: /run/spire/sockets/spire-agent.sock   (cluster "spire_agent", SDS)</code></pre>
+
+<div class="key">
+  <span class="label">Le déclic</span>
+  Tu viens de découvrir <strong>la même architecture que le service mesh</strong> — mais
+  <em>câblée à la main, pour un seul service</em>. Un proxy à côté de l'app, qui porte le
+  mTLS et transmet l'identité par header. C'est <em>exactement</em> ce que fait Istio… sauf
+  qu'Istio l'injecte <strong>automatiquement partout</strong>. Tu as bâti le mesh à la main
+  sans le savoir.
+</div>
+
+<h2>4. La leçon que ça enseigne (la transition de l'Acte 3)</h2>
+
+<p>Regarde ce que tu as maintenant dans la v1 :</p>
+<ul>
+  <li>4 services Go avec du mTLS <strong>câblé dans le code</strong> (<code>go-spiffe</code>).</li>
+  <li>1 service Node avec du mTLS <strong>câblé dans une ConfigMap Envoy</strong> à la main.</li>
+</ul>
+
+<p>Deux façons différentes de faire <em>la même chose</em>, à maintenir séparément. Et à
+chaque nouveau service, on recommence. <strong>Le problème n'est plus la sécurité — c'est la
+répétition.</strong> D'où la question qui lance l'Acte 3 :</p>
+
+<div class="note">
+  <span class="label">La question qui mène au mesh</span>
+  « Si chaque service a besoin d'un proxy à côté de lui pour porter le mTLS et l'identité…
+  pourquoi ne pas <strong>injecter ce proxy automatiquement, partout</strong>, et le piloter
+  depuis un point central ? » → C'est <em>exactement</em> la définition d'un
+  <a href="../reference/glossaire.html#service-mesh">service mesh</a>.
+</div>
+
+<div class="jury">
+  <span class="label">Question de jury</span>
+  <p class="q">« Pourquoi mettre Analytics derrière Envoy plutôt que d'ajouter le mTLS dans
+  le code Node, comme vous l'avez fait en Go ? »</p>
+  <p><strong>Réponse :</strong> pour ne pas réimplémenter — et re-maintenir, et re-tester —
+  la même logique de sécurité dans chaque langage. La librairie <code>go-spiffe</code> est
+  parfaite en Go ; en Node il faudrait un équivalent, puis encore un autre en Python demain.
+  En déléguant à Envoy, la sécurité devient <strong>indépendante du langage</strong> : l'app
+  parle HTTP clair en local, le proxy porte le mTLS. C'est le même principe que le mesh —
+  d'ailleurs en v2, Istio fait <em>exactement</em> ça, mais injecté automatiquement pour
+  <em>tous</em> les services, Go compris.</p>
+</div>
+
+<h2>Vérifie que ça tient</h2>
+
+<div class="quiz" data-answer="3">
+  <div class="q">En v1, comment Analytics (Node.js) est-il sécurisé en mTLS ?</div>
+  <button>Il ne l'est pas : Analytics est le seul service exempté de mTLS dans la v1.</button>
+  <button>Une librairie SPIFFE pour Node, équivalente à go-spiffe, est intégrée au code.</button>
+  <button>Le réseau k3s chiffre automatiquement tout le trafic vers le pod Analytics.</button>
+  <button>Un sidecar Envoy porte le mTLS ; l'app Node écoute en clair sur la loopback.</button>
+  <div class="explain">Analytics A du mTLS — mais c'est un Envoy en sidecar qui le porte,
+  pas le code Node. L'app écoute en HTTP clair sur 127.0.0.1:9090, joignable seulement par
+  Envoy, qui termine le mTLS sur :8443 et transmet l'identité par header. Ne jamais dire
+  « Analytics n'a pas de mTLS ».</div>
+</div>
+
+<div class="quiz" data-answer="0">
+  <div class="q">Quel problème le sidecar Envoy résout-il, qui annonce le service mesh ?</div>
+  <button>Éviter de réimplémenter la logique SPIFFE/mTLS dans chaque langage de service.</button>
+  <button>Réduire la latence réseau en supprimant le handshake mTLS entre les services.</button>
+  <button>Chiffrer les données au repos dans la base plutôt que seulement en transit.</button>
+  <button>Permettre au navigateur de parler directement à Analytics sans passer par Gateway.</button>
+  <div class="explain">Le sidecar rend la sécurité INDÉPENDANTE DU LANGAGE : l'app parle HTTP
+  clair, le proxy porte le mTLS. Plus besoin d'un go-spiffe en Go, un autre en Node, un autre
+  en Python… Généraliser ce proxy + l'injecter automatiquement partout = la définition du
+  service mesh (Acte 3).</div>
+</div>
+
+<footer>
+  <div class="primary">
+    <span class="label">Source primaire (8 min)</span>
+    <strong>Envoy — « Sidecar » & le rôle de proxy de service</strong> : pourquoi un proxy
+    à côté de l'app, et le pattern « application networking ».
+    <a href="https://www.envoyproxy.io/docs/envoy/latest/intro/what_is_envoy">envoyproxy.io/docs/envoy/latest/intro/what_is_envoy</a>
+  </div>
+
+  <nav>
+    <span>← <a href="0005-authentifie-nest-pas-autorise.html">Leçon 5 — AuthZ ≠ AuthN</a></span>
+    <span><strong>Suivant :</strong> <a href="0007-data-plane-control-plane.html">Leçon 7 — Sidecar, data plane &amp; control plane</a> →</span>
+  </nav>
+
+  <p class="ask">Ton enseignant, c'est l'agent. Tu veux décortiquer la ConfigMap Envoy
+  complète, comprendre SDS vs Workload API, ou enchaîner ? Demande-lui.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

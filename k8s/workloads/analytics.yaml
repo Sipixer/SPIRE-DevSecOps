@@ -1,8 +1,4 @@
-# Analytics : app Node.js. En v2, plus de sidecar Envoy maison ni de ConfigMap
-# de 99 lignes : le sidecar Istio (injecté automatiquement via le label
-# istio-injection du namespace) porte le mTLS et transmet l'identité du pair à
-# l'app via l'en-tête X-Forwarded-Client-Cert. L'app écoute en clair sur :8080.
-# L'identité Istio vient du ServiceAccount : spiffe://cluster.local/ns/shop/sa/analytics.
+# Analytics (Node.js) : sidecar Istio injecté, identité spiffe://.../sa/analytics.
 apiVersion: v1
 kind: ServiceAccount
 metadata: { name: analytics, namespace: shop }
